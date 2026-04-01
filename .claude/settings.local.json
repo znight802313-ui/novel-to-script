@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run dev -- --port 3005)",
+      "Bash(npm run build)",
+      "Bash(node test-models.js)",
+      "Bash(node test-all-6-models.js)",
+      "Bash(npm run dev)",
+      "Bash(ls -la /Users/zengweiguo/Downloads/剧本创作智能体/components/*.tsx)",
+      "Bash(grep -n \"apiKey\\\\|API_KEY\\\\|VITE_API\" /Users/zengweiguo/Downloads/剧本创作智能体/utils/*.ts)",
+      "Bash(ls -la /Users/zengweiguo/Downloads/剧本创作智能体/.env*)",
+      "Bash(lsof -ti:3000,3001)",
+      "Bash(xargs kill -9)",
+      "Bash(lsof -ti:5173)",
+      "Bash(curl -X POST \"https://once.novai.su/v1/chat/completions\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer sk-KW7XVLjLAHeiMGPhQAPypobB99AjT96FftTLCgujCwT0UYuA\" -d '{\n    \"\"model\"\": \"\"[次]claude-sonnet-4-5-thinking\"\",\n    \"\"messages\"\": [{\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"Hi\"\"}],\n    \"\"max_tokens\"\": 10\n  }' --max-time 10)",
+      "Bash(curl -X POST \"https://once.novai.su/v1/chat/completions\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer sk-KW7XVLjLAHeiMGPhQAPypobB99AjT96FftTLCgujCwT0UYuA\" -d '{\n    \"\"model\"\": \"\"[次]gemini-3-pro-preview-thinking\"\",\n    \"\"messages\"\": [{\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"Hi\"\"}],\n    \"\"max_tokens\"\": 10\n  }' --max-time 10)",
+      "Bash(node /tmp/test-models.js)",
+      "Bash(node /tmp/test-mixai-models.js)",
+      "Bash(kill 58866 58867)",
+      "Bash(lsof -i :3000)",
+      "Bash(pkill -f \"vite.*剧本创作\")",
+      "Bash(npm run preview -- --host --port 3002)",
+      "Bash(lsof -i :3003)",
+      "Bash(npm run preview -- --host --port 3003)",
+      "Bash(lsof -i :3001 -i :3003)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3003/)",
+      "Bash(pkill -f \"preview\")",
+      "Bash(npx tsc --noEmit)",
+      "Bash(lsof -ti:3001)"
+    ]
+  }
+}

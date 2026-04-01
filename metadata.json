@@ -1,0 +1,5 @@
+{
+  "name": "NovelToScript AI Studio",
+  "description": "A cheerful and efficient tool for adapting novels into screenplays using Gemini AI. Supports iterative episode generation with context awareness.",
+  "requestFramePermissions": []
+}

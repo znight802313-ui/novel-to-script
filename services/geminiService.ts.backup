@@ -1,0 +1,1270 @@
+
+import { ScriptGenerationConfig, ChatMessage, AuditItem, CharacterProfile, StoryBlueprint, AnalyzedCharacter, PlotPhase, CharacterStage, AuditReport, AuditAnnotation, AuditScore, ComparisonReport } from "../types";
+import { callUniversalAPI, getAPIConfig, type ChatMessage as APIMessage } from "./apiClient";
+
+// 可用模型列表 - 保留完整的 Model ID（包括 [限时] 和 [次] 前缀）
+export const AVAILABLE_MODELS = [
+  { id: '[次]claude-sonnet-4-5-thinking', name: 'Claude 4.5 Sonnet (次)', fallback: '[次]gemini-3-pro-preview-thinking' },
+  { id: '[次]gemini-3-pro-preview-thinking', name: 'Gemini 3 Pro (次)', fallback: '[次]gemini-3-flash-preview' },
+  { id: '[次]gemini-3-flash-preview', name: 'Gemini 3 Flash (次)', fallback: null },
+  { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5 (MixAI)', fallback: '[次]gemini-3-pro-preview-thinking' },
+  { id: '[次]gpt-5.2', name: 'GPT-5.2 (次)', fallback: '[次]gemini-3-pro-preview-thinking' },
+];
+
+const cleanJson = (text: string): string => {
+  if (!text) return "";
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?/i, "").replace(/```$/, "");
+  }
+  return cleaned.trim();
+};
+
+// ... (Analyze functions) ...
+export const analyzeArchitectureOnly = async (
+    apiKey: string,
+    novelText: string,
+    currentBlueprint: StoryBlueprint | null,
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+) => {
+    const config = getAPIConfig(apiKey, baseUrl, modelId);
+
+    const summaryContext = currentBlueprint ? `
+    【前文剧情摘要】：${currentBlueprint.summarySoFar}
+    【当前进度】：已分析约 ${currentBlueprint.analyzedChapters} 章
+    ` : "这是小说的开篇分析。";
+
+    const prompt = `
+# Role
+你是一名资深网文主编和剧情架构师。
+# Task
+请根据【小说最新章节】，提取"故事三维架构"和"暗线"。
+${summaryContext}
+
+# Input Text
+${novelText.substring(0, 50000)} ...
+
+# Continuity Instruction (连贯性要求)
+这是一个**长篇连续剧**的分析任务。请注意：
+1. **不要**机械地开启新阶段，如果本批次剧情属于上一个"成长阶段"的延续，请继续沿用上一个阶段的逻辑。
+2. 重点分析本批次新增的【关键事件】和【冲突结果】。
+
+# Extraction Rules
+A. **成长/进化线 (Growth)**：主角"从何处来—到何处去"的轨迹（能力/地位/认知）。
+B. **羁绊/团队线 (Bond)**：主角与队友/CP/宿敌的关系演变与高光互动。
+C. **对抗/势力线 (Conflict)**：【冲突原因】+【主角应对策略】+【结果与收益】（遵循公式：危机+策略/金手指+破局=收获）。
+D. **暗线/宿命线 (Mystery)**：身世秘密、复仇线索、伏笔。
+E. **本批次摘要**：简练概括本批次剧情。
+
+# Output JSON
+{
+  "summaryOfThisBatch": "string",
+  "growthArc": { "summary": "string", "newNodes": [ { "stage": "string", "event": "string", "action": "string", "result": "string" } ] },
+  "conflictArcNodes": [ { "stage": "初级/中级等", "antagonist": "string", "conflict": "string", "result": "string" } ],
+  "relationshipNodes": [ { "character": "string", "identity": "string", "change": "string" } ],
+  "mysteryNodes": [ { "origin": "string", "progress": "string", "suspense": "string" } ]
+}
+`;
+    const response = await callUniversalAPI(config, modelId, [
+        { role: 'user', content: prompt }
+    ], {
+        temperature: 0.3,
+        responseFormat: { type: 'json_object' },
+    });
+
+    const cleaned = cleanJson(response.text);
+    return JSON.parse(cleaned || "{}");
+};
+
+export const analyzeOutlineOnly = async (
+    apiKey: string,
+    novelText: string,
+    currentBlueprint: StoryBlueprint | null,
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+) => {
+    const client = getAIClient(apiKey, baseUrl, modelId);
+
+    // Extract last known state for Continuity
+    const lastPhase = currentBlueprint?.mainPlotArc.phases.length
+        ? currentBlueprint.mainPlotArc.phases[currentBlueprint.mainPlotArc.phases.length - 1]
+        : null;
+    const lastPhaseName = lastPhase ? lastPhase.phaseName : "无";
+    const lastEventSummary = lastPhase?.events.length
+        ? lastPhase.events[lastPhase.events.length - 1].summary
+        : "无";
+
+    const summaryContext = currentBlueprint ? `
+    【前文剧情摘要】：${currentBlueprint.summarySoFar}
+    【上一个剧情阶段(Last Phase)】：${lastPhaseName}
+    【最后一个事件(Last Event)】：${lastEventSummary}
+    ` : "这是小说的开篇分析。";
+
+    const prompt = `
+# Role
+你是一名精通商业小说节奏铺排的剧情策划。
+
+# Task
+请根据【小说最新章节】，输出一份**结构化、数据化、可直接用于分集**的**主线大纲**。
+${summaryContext}
+
+# Input Text
+${novelText.substring(0, 50000)} ...
+
+# Continuity Instruction (CRITICAL - 连贯性要求)
+你正在处理长篇小说的中间部分。文本的开头通常紧接【最后一个事件】。
+1. **SOFT BOUNDARY (软边界)**：不要因为文本分批（如第10章结束）就强行结束一个剧情阶段。
+   - 如果本批次开头的剧情依然属于【${lastPhaseName}】这个阶段的范畴（例如同一个副本、同一场战争），**必须**再次输出相同的 \`phaseName\`，以便我将其合并。
+2. **MERGE LOGIC (合并逻辑)**：仅当剧情发生重大转折（如换地图、时间跳跃、核心矛盾彻底解决）时，才开启全新的 Phase。
+
+# Structural Requirements (必须严格执行)
+请将内容按剧情阶段（Phase）和具体事件（Events）进行拆解。对于每个 Event，必须包含以下 5 个维度的详细信息：
+
+1. **剧情主线 & 改编重要度**：
+   - **summary**: 100字左右，剔除旁白和心理活动，动作骨架（谁+做了什么+结果如何）。
+   - **importance**: 打分 1-5 (5=核心转折/死亡/揭秘, 3=铺垫/升级, 1=注水/日常)。
+
+2. **关键情节点 & 情绪浓度** (plotPoints):
+   - 按时间序列出 3-5 个情节点。
+   - **emotionalScore**: 1-10分 (10分=极度震撼/爽点/泪点)。
+   - **emotionalTag**: 情绪标签 (如: 逆袭打脸, 绝望, 甜蜜)。
+   - **foreshadowing**: 若有伏笔，请简述，否则留空。
+
+3. **世界观设定补充** (worldview):
+   - **powerSystem**: 新等级/技能。
+   - **items**: 法宝/丹药。
+   - **geography**: 新地图/势力。
+   - **monsters**: 异兽/NPC。
+   - (若无新设定则留空)
+
+4. **金手指 (Golden Finger)** (goldenFinger):
+   - **definition**: 主角打破规则的优势/系统/异能。
+   - **impact**: 本事件中起了什么具体作用？
+   - **cost**: 代价或限制。
+   - **ruleBreaker**: 它是如何打破常规世界观规则的？
+
+5. **金句 (Quotes)**:
+   - 提取最具冲击力或符合人设的台词 1-3 句。
+
+# Output JSON
+{
+  "phases": [
+    {
+      "phaseName": "例如：第一阶段：起——绝境重生...",
+      "events": [
+         {
+            "title": "例如：绝境觉醒",
+            "range": "例如：1-3章",
+            "summary": "...",
+            "importance": 5,
+            "plotPoints": [
+                { "description": "...", "emotionalScore": 10, "emotionalTag": "爽点", "foreshadowing": "..." }
+            ],
+            "worldview": { "powerSystem": "...", "items": "..." },
+            "goldenFinger": { "definition": "...", "impact": "..." },
+            "quotes": ["..."]
+         }
+      ]
+    }
+  ]
+}
+`;
+    const response = await client.chat.completions.create({
+        model: modelId,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+    });
+    return JSON.parse(cleanJson(response.choices[0]?.message?.content || "{}"));
+};
+
+export const analyzeCharactersOnly = async (
+    apiKey: string,
+    novelText: string,
+    currentCharacters: AnalyzedCharacter[],
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+) => {
+    const client = getAIClient(apiKey, baseUrl, modelId);
+
+    // Context compression for previous characters with their LAST stage info
+    const prevContextChar = JSON.stringify(currentCharacters.map(c => ({
+        name: c.name,
+        last_known_stage_name: c.timeline.length > 0 ? c.timeline[c.timeline.length-1].stageName : "Initial"
+    })));
+
+    const prompt = `
+# Role
+你是一名专业的人物侧写师，正在构建一个基于**时间轴**的人物状态机系统。
+
+# Task
+请根据【小说最新章节】，提取或更新**所有出场人物**（包括重要的反派、配角）的【动态人物档案】。
+目标是捕捉人物随剧情发展的"快照"，防止剧本创作时的 OOC（性格崩坏）。
+【已有角色及最后状态】：${prevContextChar}
+
+# Input Text
+${novelText.substring(0, 50000)} ...
+
+# Trigger Logic (核心逻辑：必须严格执行阶段拆分)
+请仔细分析本批次文本中人物的**变化过程**。如果人物在本批次内发生了以下**任意一种突变**，请务必**拆分为不同的 Stage**（例如生成 Stage N 和 Stage N+1），不要只记录最终状态！
+
+## 必须拆分 Stage 的 4 大判定标准：
+1. **信息壁垒破碎 (Info Breach)**
+   - 判定：角色是否得知了一个颠覆性的真相？
+   - *例子*：孙悟空一开始对主角被处刑是"看戏"态度（Stage 1），中途得知主角是师弟后变为"护短"态度（Stage 2）。
+   - *后果*：如果不拆，AI 会在前面剧情错误地表现出护短。
+
+2. **核心驱动力改变 (Goal Shift)**
+   - 判定：行动逻辑是否变了？（如：从"苟且偷生"变成"决死反击"）
+   - *后果*：戏的冲突方向错误。
+
+3. **物理状态严重改变 (Physical State Shift)**
+   - 判定：是否受了重伤、残疾、中毒，或获得超常能力？
+   - *后果*：动作描写不连贯。
+
+4. **关系矩阵反转 (Relation Shift)**
+   - 判定：盟友变死敌，或者死敌变恋人。
+   - *后果*：对话潜台词错误。
+
+## Few-Shot Example (参考案例：如何拆分阶段)
+请学习以下 JSON 结构，特别是如何利用 \`new_stages\` 数组表达本批次内的**多阶段变化**：
+{
+  "characterUpdates": [
+    {
+      "static_profile": { "name": "李萧", "gender": "男", "role": "男主" },
+      "new_stages": [
+        {
+          "stage_name": "少年乞讨期",
+          "source_mapping": { "text_range": "第1-5章" },
+          "age_status": { "current_age": "12", "visual_age_desc": "瘦骨嶙峋" },
+          "visual_layer": { "appearance": "衣不蔽体", "physical_state": "虚弱/跛足", "signature_props": "生锈铁条" },
+          "cognitive_layer": { "known_info": ["不知身世"], "core_goal": "活下去" },
+          "relation_layer": [{ "target": "老乞丐", "attitude": "依赖", "subtext": "讨食" }]
+        },
+        {
+          "stage_name": "皇宫暗斗期 (假设本批次发生了跨越)",
+          "source_mapping": { "text_range": "第6-10章" },
+          "age_status": { "current_age": "18", "visual_age_desc": "身姿挺拔" },
+          "visual_layer": { "appearance": "宫廷锦袍", "physical_state": "优雅但装病", "signature_props": "折扇" },
+          "cognitive_layer": { "known_info": ["知晓身世"], "core_goal": "造反" },
+          "relation_layer": [{ "target": "皇帝", "attitude": "杀意", "subtext": "表忠心实则欺骗" }]
+        }
+      ]
+    }
+  ]
+}
+
+# Data Schema Requirements
+对于每个角色，必须包含：
+A. **静态底座**：姓名、性别、籍贯、功能定位。
+B. **动态时间轴 (new_stages)**：**这是一个数组！**如果人物在本批次中有明显变化（符合上述4大标准），请输出**多个 Stage** 对象；如果没有变化，输出一个代表当前状态的 Stage。
+
+每个 Stage 必须包含 5 个锚点层级：
+1. **Mapping**: 对应章节范围。
+2. **Age & Status**: 生理年龄 + 视觉年龄描述。
+3. **Visual Layer**: appearance, physical_state (身体状态), signature_props.
+4. **Cognitive Layer**: known_info (已知信息), core_goal (核心欲望).
+5. **Voice & Relation**: speaking_style, personality_tags, relation_layer (关系矩阵: target, attitude, subtext).
+
+# Output JSON
+{
+  "characterUpdates": [
+      {
+          "static_profile": {
+              "name": "角色名",
+              "gender": "男/女",
+              "origin": "籍贯/种族",
+              "role": "男主/女主/反派/配角",
+              "bio": "一句话静态简介"
+          },
+          "new_stages": [
+              {
+                  "stage_name": "阶段名",
+                  "source_mapping": { "text_range": "章节范围", "chapter_start": 1, "chapter_end": 1 },
+                  "age_status": { "current_age": "string", "visual_age_desc": "string" },
+                  "visual_layer": {
+                      "appearance": "string",
+                      "physical_state": "string",
+                      "signature_props": "string"
+                  },
+                  "cognitive_layer": {
+                      "known_info": ["string"],
+                      "core_goal": "string"
+                  },
+                  "voice_layer": {
+                      "speaking_style": "string",
+                      "personality_tags": ["string"]
+                  },
+                  "relation_layer": [
+                      { "target": "string", "attitude": "string", "subtext": "string" }
+                  ]
+              }
+          ]
+      }
+  ]
+}
+`;
+    const response = await client.chat.completions.create({
+        model: modelId,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.4,
+        response_format: { type: 'json_object' },
+    });
+    return JSON.parse(cleanJson(response.choices[0]?.message?.content || "{}"));
+};
+
+export const analyzeNovelStory = async (
+    apiKey: string,
+    novelText: string,
+    currentBlueprint: StoryBlueprint | null,
+    currentCharacters: AnalyzedCharacter[],
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+): Promise<{ blueprint: StoryBlueprint; characters: AnalyzedCharacter[] }> => {
+    
+    console.log(`Analyzing story (Step 1) with model: ${modelId} - 3 Parallel Calls (Robust Mode)`);
+
+    // Helper to safely run a promise and return null on failure instead of throwing
+    const safeRun = async <T>(promise: Promise<T>, name: string): Promise<T | null> => {
+        try {
+            return await promise;
+        } catch (e) {
+            console.error(`Error in ${name} analysis:`, e);
+            return null;
+        }
+    };
+
+    // Execute 3 Parallel Requests independently
+    const [archResult, outlineResult, charResult] = await Promise.all([
+        safeRun(analyzeArchitectureOnly(apiKey, novelText, currentBlueprint, baseUrl, modelId), 'Architecture'),
+        safeRun(analyzeOutlineOnly(apiKey, novelText, currentBlueprint, baseUrl, modelId), 'Outline'),
+        safeRun(analyzeCharactersOnly(apiKey, novelText, currentCharacters, baseUrl, modelId), 'Characters')
+    ]);
+
+    if (!archResult && !outlineResult && !charResult) {
+        throw new Error("所有分析任务均失败，请检查 API Key 或网络连接。");
+    }
+
+    // --- Merge Logic: Blueprint & Outline ---
+    let newBlueprint: StoryBlueprint = currentBlueprint ? { ...currentBlueprint } : {
+        growthArc: { summary: "", nodes: [] },
+        conflictArc: { nodes: [] },
+        relationshipArc: { nodes: [] },
+        mysteryArc: { summary: "", nodes: [] },
+        mainPlotArc: { phases: [] },
+        analyzedChapters: 0,
+        summarySoFar: ""
+    };
+
+    // 1. Merge Architecture
+    if (archResult) {
+        newBlueprint.growthArc.summary = archResult.growthArc?.summary || newBlueprint.growthArc.summary;
+        newBlueprint.growthArc.nodes = [...newBlueprint.growthArc.nodes, ...(archResult.growthArc?.newNodes || [])];
+        newBlueprint.conflictArc.nodes = [...newBlueprint.conflictArc.nodes, ...(archResult.conflictArcNodes || [])];
+        newBlueprint.relationshipArc.nodes = [...newBlueprint.relationshipArc.nodes, ...(archResult.relationshipNodes || [])];
+        newBlueprint.mysteryArc.nodes = [...newBlueprint.mysteryArc.nodes, ...(archResult.mysteryNodes || [])];
+        newBlueprint.summarySoFar = (newBlueprint.summarySoFar || "") + "\n" + (archResult.summaryOfThisBatch || "");
+    }
+
+    // 2. Merge Outline (Structured Events) with Intelligent Phase Merging
+    if (outlineResult && outlineResult.phases && Array.isArray(outlineResult.phases)) {
+        let updatedPhases = [...newBlueprint.mainPlotArc.phases];
+        
+        outlineResult.phases.forEach((newPhase: PlotPhase) => {
+            const lastPhase = updatedPhases.length > 0 ? updatedPhases[updatedPhases.length - 1] : null;
+            
+            // Check for Continuity: Same Phase Name OR Substring Match (e.g., "Origin" vs "Origin Phase")
+            const isContinuation = lastPhase && (
+                lastPhase.phaseName === newPhase.phaseName || 
+                lastPhase.phaseName.includes(newPhase.phaseName) || 
+                newPhase.phaseName.includes(lastPhase.phaseName)
+            );
+
+            if (isContinuation) {
+                // Merge into existing phase
+                const enhancedEvents = newPhase.events.map(evt => ({
+                    ...evt,
+                    content: evt.summary || evt.content || "No summary generated"
+                }));
+                lastPhase!.events.push(...enhancedEvents);
+            } else {
+                // Start new phase
+                const enhancedEvents = newPhase.events.map(evt => ({
+                    ...evt,
+                    content: evt.summary || evt.content || "No summary generated"
+                }));
+                updatedPhases.push({ ...newPhase, events: enhancedEvents });
+            }
+        });
+        newBlueprint.mainPlotArc.phases = updatedPhases;
+    }
+
+    // 3. Merge Characters (Complex Timeline Merge with Multi-Stage Support)
+    const newCharacters = [...currentCharacters];
+    if (charResult && charResult.characterUpdates) {
+        charResult.characterUpdates.forEach((update: any) => {
+            if (!update.static_profile || !update.static_profile.name) return;
+            
+            const charName = update.static_profile.name;
+            let existingCharIndex = newCharacters.findIndex(c => c.name === charName);
+            
+            // Map JSON response to Internal Type
+            const mapStage = (jsonStage: any, idx: number): CharacterStage => ({
+                id: Date.now().toString() + Math.random(),
+                stageIndex: idx,
+                stageName: jsonStage.stage_name || `阶段 ${idx}`,
+                sourceRange: jsonStage.source_mapping?.text_range || "未知章节",
+                startChapter: jsonStage.source_mapping?.chapter_start || 0,
+                endChapter: jsonStage.source_mapping?.chapter_end || 0,
+                currentAge: jsonStage.age_status?.current_age || "未知",
+                visualAgeDesc: jsonStage.age_status?.visual_age_desc || "",
+                appearance: jsonStage.visual_layer?.appearance || "",
+                physicalState: jsonStage.visual_layer?.physical_state || "",
+                signatureProps: jsonStage.visual_layer?.signature_props || "",
+                knownInfo: jsonStage.cognitive_layer?.known_info || [],
+                coreGoal: jsonStage.cognitive_layer?.core_goal || "",
+                speakingStyle: jsonStage.voice_layer?.speaking_style || "",
+                personalityTags: jsonStage.voice_layer?.personality_tags || [],
+                relations: jsonStage.relation_layer || []
+            });
+
+            // Normalize response: Support both `new_stages` (Array) and `new_stage` (Object legacy fallback)
+            let incomingStages: any[] = [];
+            if (update.new_stages && Array.isArray(update.new_stages)) {
+                incomingStages = update.new_stages;
+            } else if (update.new_stage) {
+                incomingStages = [update.new_stage];
+            }
+
+            if (existingCharIndex === -1) {
+                // New Character
+                // If there are multiple stages in the first batch, map them all
+                const initialStages = incomingStages.map((s, i) => mapStage(s, i + 1));
+                const newChar: AnalyzedCharacter = {
+                    id: Date.now().toString() + Math.random(),
+                    name: update.static_profile.name,
+                    gender: update.static_profile.gender || "未知",
+                    origin: update.static_profile.origin || "未知",
+                    role: update.static_profile.role || "配角",
+                    bio: update.static_profile.bio || "",
+                    timeline: initialStages
+                };
+                newCharacters.push(newChar);
+            } else {
+                // Existing Character - Intelligent Stage Merging
+                const existingChar = newCharacters[existingCharIndex];
+                
+                incomingStages.forEach((incomingStage) => {
+                    const lastStage = existingChar.timeline.length > 0 ? existingChar.timeline[existingChar.timeline.length-1] : null;
+                    const newStageName = incomingStage.stage_name || "";
+                    
+                    // IF last stage name matches new stage name, MERGE/UPDATE
+                    // UNLESS prompt specifically asked for split (which produces a different stage name).
+                    if (lastStage && lastStage.stageName === newStageName) {
+                        // Merge/Update logic
+                        lastStage.endChapter = incomingStage.source_mapping?.chapter_end || lastStage.endChapter;
+                        lastStage.sourceRange = `${lastStage.sourceRange.split('-')[0]} - ${incomingStage.source_mapping?.text_range.split('-')[1] || "..."}`;
+                        lastStage.physicalState = incomingStage.visual_layer?.physical_state || lastStage.physicalState;
+                        lastStage.coreGoal = incomingStage.cognitive_layer?.core_goal || lastStage.coreGoal;
+                        // Important: Update relations to reflect latest dynamic
+                        lastStage.relations = incomingStage.relation_layer || lastStage.relations;
+                    } else {
+                        // New Stage (Split detected)
+                        const nextIndex = existingChar.timeline.length + 1;
+                        existingChar.timeline.push(mapStage(incomingStage, nextIndex));
+                    }
+                });
+                
+                // Update static info if missing
+                if (!existingChar.bio && update.static_profile.bio) existingChar.bio = update.static_profile.bio;
+                if (!existingChar.origin && update.static_profile.origin) existingChar.origin = update.static_profile.origin;
+            }
+        });
+    }
+
+    return { blueprint: newBlueprint, characters: newCharacters };
+};
+
+export const testApiConnection = async (apiKey: string, baseUrl?: string): Promise<{success: boolean, message: string}> => {
+  try {
+     const testModel = '[次]gemini-3-flash-preview';
+     const client = getAIClient(apiKey, baseUrl, testModel);
+     await client.chat.completions.create({
+        model: testModel,
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 10,
+     });
+     return { success: true, message: "验证成功！您的配置可以正常连接 API。" };
+  } catch (e: any) {
+     console.error("Connection Test Failed:", e);
+     let errorMsg = e.message || "未知错误";
+     if (e.status === 404) errorMsg += " (请检查 Base URL 或模型名称)";
+     if (e.status === 401 || e.status === 403) errorMsg += " (鉴权失败，请检查 API Key)";
+     if (e.message?.includes("API Key")) errorMsg = e.message;
+     return { success: false, message: "连接失败: " + errorMsg };
+  }
+};
+
+export const generateDraftEpisodes = async (
+    apiKey: string,
+    novelText: string,
+    blueprint: StoryBlueprint,
+    startEpisodeId: number,
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking',
+    targetEpisodeCount: number | null = null,
+    previousContext: string = ""
+): Promise<any[]> => {
+    const client = getAIClient(apiKey, baseUrl, modelId);
+
+    const mainPlotContext = blueprint.mainPlotArc.phases.map(p => 
+        `阶段：${p.phaseName}\n事件：${p.events.map(e => `${e.title} (重要度:${e.importance}星) - ${e.summary}`).join('; ')}`
+    ).join('\n\n');
+
+    let episodeConstraint = `
+    **集数估算策略（密度控制）**：
+    请根据【小说正文】的实际信息密度进行切分，**不要为了赶进度而压缩剧情**。
+    - **标准密度**：对应生成的剧本字数约为 **600-900字/集**。
+    - **切分建议**：通常 **1500-2000字左右的小说原文** 改编为 **1 集** 短剧是比较合理的节奏（如果对话多则篇幅可略长，动作多则篇幅需短）。
+    - 如果一段剧情全是心理描写，请通过“视觉化外化”来填充一集，而不是直接跳过。
+    `;
+    
+    if (targetEpisodeCount) {
+        episodeConstraint = `**强制要求**：请将本批次小说内容严格切分为 **${targetEpisodeCount} 集**。请注意分配均匀，不要前紧后松。`;
+    }
+
+    let continuityInstruction = "";
+    if (previousContext) {
+        continuityInstruction = `
+### 剧情连贯性要求 (最高优先级)
+这是该剧的中间部分。
+**上一集结尾/上下文**：${previousContext.slice(-500)}
+**要求**：本批次的第一集必须**自然流畅**地接上文。
+1. 如果上集结尾是悬念，这集开头必须承接（解开或推进）。
+2. **严禁断层**：不要突然跳跃时间线或场景，除非原著就是这么写的。
+`;
+    }
+
+    const prompt = `
+# Role
+你是一名追求**逻辑严密**和**原著还原度**的精品短剧编剧。
+你反感市面上那种为了“爽”而逻辑崩坏、强行降智的“无脑短剧”。你擅长在保留原著韵味的基础上，通过视听语言提升节奏感，而不是通过魔改剧情。
+
+# Task
+请阅读提供的【小说正文片段】，并结合【剧情主线架构】，将其改编为一份**分集大纲**（用于指导后续剧本生成）。
+起始集数编号为：${startEpisodeId}
+
+【宏观剧情主线参考】：
+${blueprint.growthArc.summary}
+
+【本批次详细事件流（作为分集核心依据）】：
+${mainPlotContext.substring(0, 3000)} ...
+
+${continuityInstruction}
+
+【小说正文片段】：
+${novelText.substring(0, 40000)} ...
+
+# Core Philosophy (改编核心原则)
+1.  **拒绝魔改 (No Radical Changes)**：
+    -   **严禁**凭空捏造原著中不存在的“强行冲突”或“低俗打脸”。
+    -   尊重原著的人物关系和行为逻辑。如果原著此处节奏较慢（如铺垫/升级），请通过**放大情绪细节**或**增加视觉张力**来写，而不是篡改剧情去制造廉价的钩子。
+
+2.  **降低密度 (Reduce Density)**：
+    -   **单集只讲 1 个核心事件**（或 2 个小事件）：一集短剧只有 1.5 分钟。切忌将 3-4 个大转折塞进一集，那会导致剧本像流水账。
+    -   **给戏份留空间**：如果一段剧情很精彩（如男女主极限拉扯），**请把它拆成两集写**，让情绪飞一会儿。
+
+3.  **钩子逻辑 (Logical Hooks)**：
+    -   **逻辑连贯 > 强行暴击**：开篇和结尾的钩子必须符合剧情自然走向。
+    -   不要为了“3秒完播率”而让主角做不符合人设的疯癫行为。
+    -   **有效钩子**：一句意味深长的台词、一个发现秘密的眼神、一个即将到来的危机预警，比无脑扇巴掌更高级。
+
+4.  **画面先行**：
+    -   分集大纲的描述请尽量**画面化**。不要写“他心里很后悔”，要写“他颤抖着手捡起地上的照片”。
+
+5.  **钩子格式要求 (Hook Format)**：
+    -   **不要写剧本格式**（不要写具体的场号、动作、对白）。
+    -   **只写情节描述**：请用通俗的大白话清晰描述作为钩子的那个具体情节或画面。
+
+${episodeConstraint}
+
+# Output Requirements
+**Metadata Extraction**:
+- **targetChapter**: 必须精确标注本集对应的原著章节（如“第5章前半部分”），不要模糊。
+- **worldSetting**: 只提取**本集会用到**的具体设定（如：本集主角使用了“隐身符”，就在此处备注隐身符的时效限制）。
+
+# Output Format (JSON Array)
+[
+  {
+    "title": "第X集：标题 (提炼核心冲突)",
+    "mainPlot": "剧情描述（300字左右。请按时间顺序描述本集发生了什么。重点描述动作和冲突，不要写流水账。请确保这部分内容写成剧本后大约是600-900字。）",
+    "openingHook": "开篇情境 (描述本集开头的具体情节或画面，承接上集。请只写情节描述，不要写成剧本格式)",
+    "endingHook": "结尾悬念 (描述本集结尾卡点处的具体情节。请只写情节描述，不要写成剧本格式)",
+    "keyQuotes": "本集原著金句 (1-2句，保留原汁原味)",
+    "foreshadowing": "本集伏笔 (选填)",
+    "worldSetting": "本集涉及的关键道具/规则 (必填)",
+    "targetChapter": "对应原著章节 (必填)",
+    "appearingCharacterNames": ["主角名", "配角名"]
+  },
+  ...
+]
+`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: modelId,
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+        });
+
+        const cleanedText = cleanJson(response.choices[0]?.message?.content || "[]");
+        const episodes = JSON.parse(cleanedText);
+        return episodes;
+    } catch (e) {
+        console.error("Reconstruction Failed", e);
+        throw e;
+    }
+};
+
+export const parseOutlineWithAI = async (
+  apiKey: string,
+  rawOutline: string,
+  baseUrl?: string
+): Promise<{
+  characterList: CharacterProfile[];
+  openingHook: string;
+  endingHook: string;
+  foreshadowing: string;
+  keyQuotes: string;
+  worldSetting: string;
+  mainPlot: string;
+  targetChapter: string;
+}> => {
+  const parseModel = '[次]gemini-3-flash-preview';
+  const client = getAIClient(apiKey, baseUrl, parseModel);
+
+  const prompt = `
+你是一个专业的剧本大纲分析助手。
+请分析以下【原始分集大纲】，并将其拆解分类为结构化数据。
+**原则**：
+1. **不改变原意**：尽量保留原始信息，只是做分类搬运。
+2. **提取与归纳**：
+   - **出场人物 (characterList)**：请提取所有人物，并尝试简要概括该人物在本集中的**人设状态/心理/目的**（例如："简初夏：刚出狱，满怀仇恨"）。
+   - 将"开篇/开头/钩子"提取到 openingHook。
+   - 将"结尾/悬念/钩子"提取到 endingHook。
+   - 将"伏笔/铺垫"提取到 foreshadowing。
+   - 将"金句/台词"提取到 keyQuotes。
+   - 将"背景/世界观/核心设定"提取到 worldSetting。
+   - 将"对应章节"提取到 targetChapter。
+   - **剧情梗概 (mainPlot)**：对应原大纲中的"剧情描述"内容，保持信息一致，不要随意删减。
+3. 如果某项信息原文中没有，则留空。
+
+【原始分集大纲】：
+${rawOutline}
+
+请输出 JSON 格式：
+{
+  "characterList": [{ "name": "人物姓名", "desc": "该人物本集的人设、状态或目的" }],
+  "openingHook": "开篇钩子或看点",
+  "endingHook": "结尾钩子或悬念",
+  "foreshadowing": "伏笔或铺垫",
+  "keyQuotes": "金句或关键台词",
+  "worldSetting": "世界观、背景或核心设定",
+  "mainPlot": "原剧集大纲信息中的剧情描述",
+  "targetChapter": "对应的原著章节号"
+}
+`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: '[次]gemini-3-flash-preview',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+    });
+
+    const cleanedText = cleanJson(response.choices[0]?.message?.content || "{}");
+    const result = JSON.parse(cleanedText);
+
+    // Ensure IDs for characters
+    if (result.characterList && Array.isArray(result.characterList)) {
+        result.characterList = result.characterList.map((c: any, idx: number) => ({
+            ...c,
+            id: Date.now().toString() + idx
+        }));
+    } else {
+        result.characterList = [];
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Outline Parsing Error:", error);
+    // Fallback
+    return {
+      characterList: [],
+      openingHook: "",
+      endingHook: "",
+      foreshadowing: "",
+      keyQuotes: "",
+      worldSetting: "",
+      mainPlot: rawOutline,
+      targetChapter: ""
+    };
+  }
+};
+
+const SYSTEM_INSTRUCTION = `
+你现在是一位拥有丰富经验的专业短剧剧本写手。你的核心任务是将提供的【小说原文】结合【分集大纲】，改编为节奏紧凑、冲突强烈、极具画面感的短剧剧本。
+
+请严格遵循以下创作原则：
+
+1.  **标准化格式与视觉化呈现**：
+    -   **场景标题**：【第X集】X-X 场景名 时间 光线/氛围
+    -   **镜头语言**：必须大量使用“⊿”符号提示每一个画面或镜头切换点，强调视觉驱动。
+    -   **视觉/音效**：格式为 ⊿【画面：...】 或 ⊿【音效：...】。注明镜头（特写、闪回、慢动作）。
+    -   **内心独白**：善用 **角色名（OS）** 传达心理活动、背景信息和情绪转变，弥补对话不足。
+    -   **对白格式**：角色名（情绪/动作）：台词。
+
+2.  **核心节奏与情绪曲线**：
+    -   **开场暴击**：每集开头前3-5秒必须设置强烈的视觉或情感冲击点（冲突/悬念/惨状），瞬间抓住眼球。
+    -   **结尾钩子**：每集结尾必须设置强力悬念、反转或极致的“爽点”/“虐点”，强迫观众点击下一集。
+    -   **快节奏**：一集内部不要包含过多拖沓情节，多用特写镜头强调重点，时长控制在 1.5-2分钟演绎长度。
+
+3.  **短剧特征与改编技巧**：
+    -   **极致精简台词**（关键）：**严禁出现长篇大论**！单句台词尽量控制在 15 字以内。如果原著台词过长，必须拆分为多句互动，或用“⊿”动作/镜头打断。
+    -   **忠实大纲**：剧情走向严格遵循【分集大纲】，不可偏离主线。
+    -   **提炼原文**：具体细节、台词金句从【小说原文】中提炼润色，保持原著韵味。
+    -   **冲突递进**：放大小说中的矛盾（如虐妻/渣男/复仇/打脸/逆袭），情绪张力拉满。
+    -   **连贯性**：如果提供了【上一集剧本结尾】，请确保剧情和情绪无缝衔接。
+    -   **人设还原**：严格参考提供的【出场人物小传/人设】，确保人物语气、行为符合当前设定，不OOC。
+
+4.  **输出限制**：只输出剧本正文，不要有任何多余的寒暄、标题前缀或解释。
+
+**【参考范例格式】**
+【第1集】
+1-1 监狱门口 公路边 雨夜
+外(0-3秒 开场暴击)
+⊿【画面：监狱门口，雨夜。简初夏穿着破烂囚服，被狱警粗暴地推搡出来。】
+狱警 (不耐烦，一脸厌恶): 滚！刑满释放了！
+⊿【画面：黑屏转特写】
+简初夏 (OS，声音疲惫): 七年婚姻，换来老公和绿茶把我送进监狱。
+⊿【画面：特写。一只沾满泥污的脚，艰难踏出铁门。】
+⊿【音效：沉重的铁门关闭声，雨声呼啸】
+...（后续剧情）
+`;
+
+export const generateEpisodeScript = async (
+  apiKey: string,
+  config: ScriptGenerationConfig,
+  modelId: string = '[次]gemini-3-flash-preview',
+  baseUrl?: string
+): Promise<string> => {
+  const client = getAIClient(apiKey, baseUrl, modelId);
+
+  // OPTIMIZATION: Reduce context size
+  const optimizedNovelContent = config.novelContent.substring(0, 10000);
+
+  // Format Character List
+  let characterContext = "";
+  if (config.characterList && config.characterList.length > 0) {
+      characterContext = config.characterList.map(c => `- ${c.name}：${c.desc}`).join("\n");
+  } else if (config.characters) {
+      characterContext = config.characters;
+  }
+
+  // Construct structured context prompt
+  let structuredContext = "";
+  
+  if (config.targetChapter) structuredContext += `\n【对应原著章节】：${config.targetChapter}\n`;
+  if (characterContext) structuredContext += `\n【本集出场人物及人设】：\n${characterContext}\n`;
+  if (config.openingHook) structuredContext += `\n【开篇钩子/看点】：${config.openingHook}\n`;
+  if (config.endingHook) structuredContext += `\n【结尾钩子/悬念】：${config.endingHook}\n`;
+  if (config.foreshadowing) structuredContext += `\n【伏笔/铺垫】：${config.foreshadowing}\n`;
+  if (config.keyQuotes) structuredContext += `\n【必须包含的金句/关键台词】：\n${config.keyQuotes}\n`;
+  if (config.worldSetting) structuredContext += `\n【世界观/背景/核心设定】：\n${config.worldSetting}\n`;
+
+  const prompt = `
+请创作剧本：**${config.episodeTitle}** （这是全剧的第 ${config.episodeId} 集）。
+
+【上一集剧本结尾参考（用于连贯性）】：
+${config.previousScriptContext ? config.previousScriptContext.slice(-800) : "无（这是第一集，请直接开始）"}
+
+【本集创作参数】：
+${structuredContext}
+
+【本集剧情梗概（核心剧情）】：
+${config.outlineContent}
+
+${optimizedNovelContent 
+    ? `【参考小说原文（用于提炼台词和细节）】：\n${optimizedNovelContent}` 
+    : "【参考小说原文】：无（请完全基于分集大纲进行创作，自行补充合理的细节和对话）"}
+
+请开始生成本集剧本。
+**强制格式要求**：
+1. 首行标题必须是：【第${config.episodeId}集】
+2. 场景编号格式：${config.episodeId}-1, ${config.episodeId}-2 ...
+3. 包含开场暴击、视觉镜头⊿、内心OS。
+`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: modelId,
+      messages: [
+        { role: 'system', content: SYSTEM_INSTRUCTION },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.75,
+    });
+    return response.choices[0]?.message?.content || "生成内容为空";
+  } catch (error) {
+    console.error("Script Generation Error:", error);
+    throw error;
+  }
+};
+
+export const refineScript = async (
+  apiKey: string,
+  currentScript: string,
+  userInstruction: string,
+  chatHistory: ChatMessage[],
+  modelId: string = '[次]gemini-3-flash-preview',
+  baseUrl?: string,
+  selectedText?: string
+): Promise<{ textResponse: string; newScript: string | null }> => {
+  const client = getAIClient(apiKey, baseUrl, modelId);
+
+  const historyContext = chatHistory.slice(-5).map(msg => 
+    `${msg.role === 'user' ? '用户' : '模型'}: ${msg.text} ${msg.quotedText ? `(引用: "${msg.quotedText.substring(0, 30)}...")` : ''}`
+  ).join('\n');
+
+  const selectionContext = selectedText 
+    ? `\n【用户特意选中的待修改片段】：\n"${selectedText}"\n\n请重点针对上述选中的片段，根据用户的指令进行修改。` 
+    : "";
+
+  const prompt = `
+你是一个专业的剧本修改助手 (Script Doctor)。你的任务是根据用户的指令修改当前的剧本。
+
+【当前剧本内容】：
+${currentScript}
+
+${selectionContext}
+
+【历史对话】：
+${historyContext}
+
+【用户最新指令】：
+${userInstruction}
+
+# Writing Techniques to Apply (Script Doctor Toolkit)
+在执行修改时，请务必运用以下专业编剧技巧（除非用户只是让你改错别字）：
+1. **Show, Don't Tell (视觉化)**: 不要让角色说出感受，要通过动作（Beat）表现出来。
+   - *Bad*: "他很生气。" -> *Good*: "他猛地摔碎了杯子，玻璃渣溅了一地。"
+2. **Subtext (潜台词)**: 台词表面意思和真实意图要有反差。让对话更耐人寻味。
+3. **Action Lines (动作流)**: 动作描写要具体、有力，避免使用模糊的形容词。
+4. **Pacing (节奏控制)**: 如果这段是冲突戏，请缩短句子，加快节奏；如果是情感戏，适当留白。
+
+**回复要求**：
+1. 首先，用自然的语言回复用户的请求（例如解释你做了什么修改）。
+2. 然后，必须输出**完整的、修改后的剧本**。
+3. **重要**：修改后的剧本必须包裹在 <SCRIPT_START> 和 <SCRIPT_END> 标签之间，以便我提取。例如：
+<SCRIPT_START>
+【第1集】
+...（修改后的完整剧本内容）
+<SCRIPT_END>
+
+请保持剧本格式的专业性（场景号、⊿视觉符号等）。
+`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+    });
+
+    const fullText = response.choices[0]?.message?.content || "";
+    
+    // Extract script
+    const scriptMatch = fullText.match(/<SCRIPT_START>([\s\S]*?)<SCRIPT_END>/);
+    let newScript = null;
+    let textResponse = fullText;
+
+    if (scriptMatch) {
+      newScript = scriptMatch[1].trim();
+      textResponse = fullText.replace(/<SCRIPT_START>[\s\S]*?<SCRIPT_END>/, '').trim();
+      if (!textResponse) textResponse = "已根据您的要求修改了剧本。";
+    }
+
+    return { textResponse, newScript };
+  } catch (error) {
+    console.error("Refine Script Error:", error);
+    throw error;
+  }
+};
+
+export const auditScript = async (
+  apiKey: string,
+  currentScript: string,
+  config: ScriptGenerationConfig,
+  modelId: string = '[次]gemini-3-flash-preview',
+  baseUrl?: string
+): Promise<AuditItem[]> => {
+  const client = getAIClient(apiKey, baseUrl, modelId);
+
+  const optimizedNovelContent = config.novelContent.substring(0, 5000);
+
+  let continuityContext = "";
+  if (config.episodeId > 1 && config.previousScriptContext) {
+      continuityContext = `4. **上一集结尾**（用于检查衔接）：\n${config.previousScriptContext.slice(-800)}\n`;
+  }
+  
+  let characterContext = "";
+  if (config.characterList && config.characterList.length > 0) {
+      characterContext = config.characterList.map(c => `- ${c.name}：${c.desc}`).join("\n");
+  } else if (config.characters) {
+      characterContext = config.characters;
+  }
+
+  const prompt = `
+你现在是短剧制作公司的【金牌主编】。请对以下【刚生成的剧本】进行严格的质量审核。
+
+**审核核心原则**：
+1. **剧情主线优先**：所有修改建议必须严格服务于【剧情大纲】的主线剧情。**严禁**为了追求所谓的“爽感”或“冲突”而偏离原大纲设定的剧情走向。
+2. **连贯性检查**：如果是第2集及以后，必须检查与上一集的剧情和情绪衔接是否自然。
+3. **原著还原度**：参考小说原文和世界观设定，确保人物不OOC（角色性格崩坏），核心设定不丢失。
+
+**审核依据**：
+1. **剧情大纲**（必须严格遵守）：${config.outlineContent}
+2. **世界观/背景**：${config.worldSetting || "无"}
+3. **小说原文参考**：${optimizedNovelContent}
+${continuityContext}
+5. **人物设定**：\n${characterContext || "无"}
+
+**审核维度**（请毒舌一点，不要客气，直接指出问题）：
+1. **主线偏移 (Plot Deviation)**：剧本是否偏离了大纲的核心剧情？是否加了多余的戏份？
+2. **剧情衔接 (Continuity)**：(仅针对第2集+) 开场是否能接得住上一集的情绪？转场是否生硬？
+3. **节奏 (Pacing)**：开篇前3秒是否够炸？结尾是否有钩子？中间是否拖沓？
+4. **冲突 (Conflict)**：矛盾是否够尖锐？
+5. **人设 (Character)**：人物行为是否符合提供的【人物设定】？是否OOC？
+6. **视觉 (Visuals)**：是否缺乏画面感？
+7. **台词 (Dialogue)**：**是否单句过长（短剧忌讳长篇大论）？** 是否太书面化？
+
+**输出要求**：
+请找出 3-6 个最关键、最需要修改的具体问题。
+每个问题必须包含：
+- **category**: 问题类别 (主线/衔接/节奏/冲突/人设/视觉/台词)
+- **severity**: 严重程度 (high/medium/low)
+- **issue**: 简短的问题描述 (例如：开场太平淡，缺乏视觉冲击)
+- **targetQuote**: 剧本中具体存在问题的这一段原文 (用于定位)
+- **suggestion**: 给编剧助理的具体修改指令 (Instruction)，要求必须是可以直接执行的动作 (例如："删除前三句闲聊，直接从巴掌声开始写起，增加XXX的心理描写")。
+
+【待审核剧本】：
+${currentScript}
+
+请输出 JSON 数组格式：
+[
+  {
+    "category": "问题类别",
+    "severity": "high/medium/low",
+    "issue": "问题描述",
+    "targetQuote": "剧本中具体存在问题的原文",
+    "suggestion": "具体修改指令"
+  }
+]
+`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.5,
+    });
+
+    const cleanedText = cleanJson(response.choices[0]?.message?.content || "[]");
+    let items = JSON.parse(cleanedText);
+
+    // Handle if response is wrapped in an object
+    if (items && !Array.isArray(items) && items.items) {
+      items = items.items;
+    }
+    if (!Array.isArray(items)) {
+      items = [];
+    }
+
+    return items.map((item: any, index: number) => ({
+      ...item,
+      id: Date.now().toString() + index,
+      status: 'pending'
+    }));
+
+  } catch (error) {
+    console.error("Audit Script Error:", error);
+    return [];
+  }
+};
+
+// --- NEW DEEP AUDIT FUNCTIONS ---
+
+export const performDeepAudit = async (
+    apiKey: string,
+    script: string,
+    novelContext: string,
+    outlineContext: string,
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+): Promise<AuditReport> => {
+    const client = getAIClient(apiKey, baseUrl, modelId);
+
+    const prompt = `
+# Role
+你是一名**资深影视策划与剧情顾问**，专注于**短剧赛道**。
+请对以下【剧本正文】进行深度体检，重点关注**剧情逻辑、结构完整性与人设一致性**。
+
+# Priority Rules (宏观优先)
+1. **宏观优先 (Macro First)**：请优先指出**剧情结构性**、**逻辑性**、**节奏性**的大问题。
+2. **忽略琐碎 (Ignore Micro)**：请**忽略**具体的台词语病或标点错误，除非它严重影响了剧情理解或人设。
+3. **[分集大纲] > [小说原文]**：大纲是核心蓝图。如果剧本偏离了大纲的核心事件，这是重大失误。
+
+# Inputs
+1. 【分集大纲 (Blueprint/Outline) - **HIGHEST PRIORITY**】：
+${outlineContext}
+
+2. 【小说原文 (Novel Reference) - **Low Priority**】：
+${novelContext.substring(0, 5000)} ...
+
+3. 【待审核剧本 (Target)】：
+${script}
+
+# Audit Dimension Checklist
+请从以下 5 个核心维度进行严格审查：
+
+1. **逻辑闭环 (Logic)**: 
+   - 行为动机是否合理？是否存在强行降智？
+   - *Example Issue*: "女主明明知道反派在场，却毫无防备地把秘密说了出来。"
+2. **情节推动 (Plot Efficiency)**: 
+   - 这一场戏是否推动了剧情？是否有效信息密度太低（水时长）？
+   - *Example Issue*: "这场戏两个人吵了3分钟，信息量为0，建议删减。"
+3. **钩子与节奏 (Hooks & Pacing)**:
+   - 开场前3秒是否抓人？结尾是否有悬念？节奏是否拖沓？
+4. **人设动机 (Character Motivation)**:
+   - 核心动作是否符合人设？（例如：高冷霸总不应该话痨）
+5. **冲突升级 (Conflict Escalation)**:
+   - 矛盾是否够尖锐？是否存在“假冲突”？
+
+# Output Schema
+请输出 JSON 格式。
+对于每条批注 (annotation)：
+- **score**: 0 (致命伤/Fatal) or 1 (建议优化/Warning)。
+- **dimension**: e.g. "逻辑.动机", "节奏.拖沓", "结构.冗余".
+- **location.lineContent**: 剧本中**最能体现该问题**的一句原文（用于高亮）。如果问题是整体性的，请摘录问题的**起始句**。
+- **issue**: 用专业的导演视角指出问题本质（例如：“此段情节逻辑断裂，缺乏前情铺垫”）。
+- **suggestion**: 给出**具体的修改策略**，而不是空话（例如：“建议删掉前面的试探，直接让男主发现真相，加快节奏”）。
+
+Example JSON Structure:
+{
+  "totalScore": 85,
+  "summary": "整体框架扎实，但中段节奏略显拖沓，建议压缩无效对话，强化冲突点。",
+  "dimensionScores": [
+    { "dimension": "逻辑闭环", "score": 90, "comment": "逻辑基本自洽" },
+    ...
+  ],
+  "annotations": [
+    {
+       "dimension": "节奏.拖沓",
+       "location": { "lineContent": "张三和李四坐在咖啡厅闲聊" },
+       "score": 0,
+       "issue": "无效过场戏，对推动主线无意义。",
+       "suggestion": "建议直接切入正题，或者将对话内容合并到下一场冲突戏中。",
+       "canBatchFix": false
+    }
+  ]
+}
+`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: modelId,
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.4,
+        });
+        const result = JSON.parse(cleanJson(response.choices[0]?.message?.content || "{}"));
+        
+        // Post-process to ensure IDs and types
+        const annotations = (result.annotations || []).map((a: any, idx: number) => ({
+            ...a,
+            id: `anno_${Date.now()}_${idx}`,
+            status: 'pending'
+        }));
+
+        return {
+            scriptId: Date.now().toString(),
+            totalScore: result.totalScore || 0,
+            dimensionScores: result.dimensionScores || [],
+            annotations: annotations,
+            summary: result.summary || "",
+            timestamp: Date.now()
+        };
+    } catch (e) {
+        console.error("Deep Audit Failed", e);
+        throw e;
+    }
+};
+
+export const getFixOptions = async (
+    apiKey: string,
+    originalText: string,
+    issue: string,
+    contextScript: string,
+    baseUrl?: string
+): Promise<string[]> => {
+    const fixModel = '[次]gemini-3-flash-preview';
+    const client = getAIClient(apiKey, baseUrl, fixModel);
+
+    const prompt = `
+# Task
+你是一名专业的短剧编剧。针对剧本中被标记为有问题的一段文字，请提供 3 个**截然不同**的修改方案。
+请注意：这不仅是修改台词，更是**优化剧情处理方式**。
+
+【问题描述】：${issue}
+【原句】："${originalText}"
+【上下文参考】：
+${contextScript.substring(0, 500)} ...
+
+# Requirement
+请输出 3 个具体的、可直接替换原句的文本段落。
+1. **方案一（极致冲突版）**：最大化情绪张力，动作幅度大，直接引爆矛盾。
+2. **方案二（悬疑/内敛版）**：通过潜台词或微表情传达信息，增加高级感和悬念。
+3. **方案三（快节奏/效率版）**：删繁就简，用最少的动作/台词完成剧情推动，适合短剧节奏。
+
+# Output Format (JSON Array of Strings)
+["方案一内容...", "方案二内容...", "方案三内容..."]
+`;
+
+    const response = await client.chat.completions.create({
+        model: '[次]gemini-3-flash-preview',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+    });
+    const result = JSON.parse(cleanJson(response.choices[0]?.message?.content || "[]"));
+    return Array.isArray(result) ? result : (result.options || result.fixes || []);
+};
+
+export const batchOptimizeScript = async (
+    apiKey: string,
+    fullScript: string,
+    optimizationType: string, // e.g., "visualize_actions", "remove_os", "fix_format"
+    baseUrl?: string
+): Promise<string> => {
+    const batchModel = '[次]gemini-3-pro-preview-thinking';
+    const client = getAIClient(apiKey, baseUrl, batchModel);
+
+    let instruction = "";
+    switch (optimizationType) {
+        case "visualize_actions":
+            instruction = "将文中所有含糊的心理/状态描写（如'愤怒地'、'悲伤地'）转换为具体的、可视化的肢体动作或微表情描写。";
+            break;
+        case "remove_os":
+            instruction = "删除文中过多的内心独白（OS）和旁白，尽量用视听语言（画面/音效/动作）来表达信息。保留最关键的OS即可。";
+            break;
+        case "fix_format":
+            instruction = "统一修正剧本格式。确保场景号规范，视觉符号（⊿）使用正确，标点符号规范。";
+            break;
+        case "enhance_hooks":
+             instruction = "强化每一场戏的结尾钩子。如果结尾平淡，增加一句悬念台词或一个意味深长的动作。";
+             break;
+        default:
+            instruction = optimizationType;
+    }
+
+    const prompt = `
+# Task
+请对以下剧本进行**全篇批量优化**。
+【优化指令】：${instruction}
+
+【原始剧本】：
+${fullScript}
+
+# Output
+请直接输出优化后的完整剧本，不要包含任何解释性文字。保持剧本格式。
+`;
+
+    const response = await client.chat.completions.create({
+        model: '[次]gemini-3-pro-preview-thinking',
+        messages: [{ role: 'user', content: prompt }],
+    });
+
+    return response.choices[0]?.message?.content || fullScript;
+};
+
+// --- NEW: Multi-Script Comparison ---
+export const compareScripts = async (
+    apiKey: string,
+    scripts: { name: string; content: string }[],
+    baseUrl?: string,
+    modelId: string = '[次]gemini-3-pro-preview-thinking'
+): Promise<ComparisonReport> => {
+    const client = getAIClient(apiKey, baseUrl, modelId);
+
+    // Prepare inputs
+    const inputs = scripts.map((s, i) => `
+    === SCRIPT ${i+1}: ${s.name} ===
+    ${s.content.substring(0, 30000)} ... (truncated if too long)
+    `).join('\n\n');
+
+    const prompt = `
+# Role
+你是一名**资深短剧制片人**，现在需要对同一集的**不同版本剧本**进行横向测评（A/B Test）。
+请从**商业价值、节奏感、冲突张力**等维度进行评分，并选出“最佳版本”。
+
+# Input Scripts
+${inputs}
+
+# Evaluation Criteria (评分维度)
+1. **冲突前置 (Hook Strength)**: 开篇3秒是否能抓住观众？
+2. **情绪价值 (Emotional Impact)**: 爽点/虐点是否到位？
+3. **视觉化程度 (Visuals)**: 是否适合拍摄？动作指令是否清晰？
+4. **台词效率 (Dialogue Efficiency)**: 是否废话少、信息密度高？
+
+# Task
+请输出一份 JSON 格式的对比报告。
+1. **winner**: 获胜的剧本文件名。
+2. **reasoning**: 200字左右的深度解析，说明为什么它获胜（对比其他版本的优势）。
+3. **items**: 每个剧本的详细分析，包含 score (0-100), rank (排名), pros (优点列表), cons (缺点列表), summary (一句话短评)。
+
+# Output Format (JSON)
+{
+  "winner": "Script Name",
+  "reasoning": "...",
+  "items": [
+    { 
+      "fileName": "Script Name", 
+      "score": 85, 
+      "rank": 1, 
+      "pros": ["..."], 
+      "cons": ["..."],
+      "summary": "..."
+    }
+  ]
+}
+`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: modelId,
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.4,
+        });
+
+        const result = JSON.parse(cleanJson(response.choices[0]?.message?.content || "{}"));
+        return {
+            ...result,
+            timestamp: Date.now()
+        };
+    } catch (e) {
+        console.error("Script Comparison Failed", e);
+        throw e;
+    }
+};
