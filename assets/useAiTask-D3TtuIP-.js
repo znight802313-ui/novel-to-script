@@ -1,4 +1,4 @@
-import{g as E,c as _,b as O,e as I,s as b}from"./jsonUtils-ChUweEZt.js";import{b as R}from"./resultParser-BR-KXFNI.js";import{_ as M}from"./index-wG4a72O2.js";import{r as C,j as N}from"./react-vendor-Dnchy7Po.js";const P=`
+import{g as E,c as _,b as O,e as I,s as b}from"./jsonUtils-ChUweEZt.js";import{b as R}from"./resultParser-BR-KXFNI.js";import{_ as M}from"./index-BTLkYrd8.js";import{r as C,j as N}from"./react-vendor-Dnchy7Po.js";const P=`
 你现在是一位拥有丰富经验的专业短剧剧本写手。你的核心任务是将提供的【小说原文】结合【分集大纲】，改编为节奏紧凑、冲突强烈、极具画面感的短剧剧本。
 
 请严格遵循以下创作原则：
