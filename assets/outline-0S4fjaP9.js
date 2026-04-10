@@ -1,4 +1,4 @@
-import{g as k,c as O}from"./jsonUtils-BOgOPRl5.js";import{p as L,a as H}from"./resultParser-BdPDeH8Q.js";import{i as p,j as z,c as J}from"./index-vqdVbmhQ.js";const y=(e,l,o="未设置")=>{const a=e??null,t=l??null;return a!==null&&t!==null?a===t?`${a}集`:`${a}-${t}集`:a!==null?`至少${a}集`:t!==null?`至多${t}集`:o},Q=e=>{if(!e)return"";const l=e.progressPercent??0,o=y(e.remainingEpisodeRangeMin,e.remainingEpisodeRangeMax,"未设置"),a=y(e.expectedTotalEpisodesMin,e.expectedTotalEpisodesMax,"未设置");let t="前期铺垫阶段",m="当前仍处在前期，可以正常铺垫人物、关系和悬念，但不要让支线戏份压过主线。";l>=80?(t="接近尾声阶段",m="当前已经接近全文尾声，必须优先主线回收、冲突升级和结局兑现，禁止再无谓扩写新支线。"):l>=50&&(t="中后期推进阶段",m="当前处在中后期，应减少枝节、提高压缩率，把更多篇幅留给核心冲突推进与关键情绪高潮。");const $=e.remainingEpisodeRangeMax!==null&&e.remainingChapters>0?`- 如果剩余可用集数上限仅剩 ${e.remainingEpisodeRangeMax} 集，请主动收敛拆分密度，避免后半程集数失控。`:"";return`
+import{g as k,c as O}from"./jsonUtils-ChUweEZt.js";import{p as L,a as H}from"./resultParser-BR-KXFNI.js";import{i as p,j as x,c as z}from"./index-wG4a72O2.js";const y=(e,l,o="未设置")=>{const a=e??null,t=l??null;return a!==null&&t!==null?a===t?`${a}集`:`${a}-${t}集`:a!==null?`至少${a}集`:t!==null?`至多${t}集`:o},J=e=>{if(!e)return"";const l=e.progressPercent??0,o=y(e.remainingEpisodeRangeMin,e.remainingEpisodeRangeMax,"未设置"),a=y(e.expectedTotalEpisodesMin,e.expectedTotalEpisodesMax,"未设置");let t="前期铺垫阶段",g="当前仍处在前期，可以正常铺垫人物、关系和悬念，但不要让支线戏份压过主线。";l>=80?(t="接近尾声阶段",g="当前已经接近全文尾声，必须优先主线回收、冲突升级和结局兑现，禁止再无谓扩写新支线。"):l>=50&&(t="中后期推进阶段",g="当前处在中后期，应减少枝节、提高压缩率，把更多篇幅留给核心冲突推进与关键情绪高潮。");const $=e.remainingEpisodeRangeMax!==null&&e.remainingChapters>0?`- 如果剩余可用集数上限仅剩 ${e.remainingEpisodeRangeMax} 集，请主动收敛拆分密度，避免后半程集数失控。`:"";return`
 【全局创作进度与预算】
 - 总章节数：${e.totalChapters}
 - 当前已处理章节数：${e.processedChapters}
@@ -14,12 +14,12 @@ ${e.estimatedTotalEpisodes?`- 按当前节奏预估总集数：约 ${e.estimated
 - 前期允许正常铺垫，但仍要保证每集都有清晰冲突、钩子或情绪推进。
 - 中后期必须减少枝节、提高压缩率，合并重复信息与弱支线，集中火力推进主线。
 - 接近尾声时，优先主线回收、冲突升级、结局兑现，禁止再无谓扩写支线或新增大支线。
-- ${m}
+- ${g}
 ${$}
-`},Y=async(e,l,o,a,t,m="[次]gemini-3-pro-preview-thinking",$=null,f="",r=1,s=1,w="",d)=>{var R,S,T,I;const F=k(e,t,m),E=o.mainPlotArc.phases.map(n=>{const c=n.events.filter(i=>{if(!i.range)return!0;const u=p(i.range);if(u.length===0)return!0;const g=Math.min(...u),j=Math.max(...u);return g<=s&&j>=r});return c.length===0?null:`阶段：${n.phaseName}
+`},Y=async(e,l,o,a,t,g="[次]gemini-3-pro-preview-thinking",$=null,f="",r=1,s=1,w="",d)=>{var R,S,T,I;const F=k(e,t,g),E=o.mainPlotArc.phases.map(n=>{const c=n.events.filter(i=>{if(!i.range)return!0;const u=p(i.range);if(u.length===0)return!0;const m=Math.min(...u),j=Math.max(...u);return m<=s&&j>=r});return c.length===0?null:`阶段：${n.phaseName}
 事件：${c.map(i=>`${i.title} (重要度:${i.importance}星) - ${i.summary}`).join("; ")}`}).filter(Boolean).join(`
 
-`),M=((S=(R=o.mysteryArc)==null?void 0:R.nodes)==null?void 0:S.filter(n=>{const c=p(n.foreshadowingChapter||""),i=p(n.payoffChapter||""),u=c.length>0&&Math.min(...c)<=s&&Math.max(...c)>=r,g=i.length>0&&Math.min(...i)<=s&&Math.max(...i)>=r;return u||g}).map(n=>{const c=p(n.foreshadowingChapter||"").some(g=>g>=r&&g<=s),i=p(n.payoffChapter||"").some(g=>g>=r&&g<=s);let u="";return c&&i?u="【🎯 本批次需铺设且回收该伏笔】":c?u="【🎯 本批次为伏笔铺垫首发节点】":i&&(u="【🎯 本批次为该暗线悬念回收节点】"),`${u}
+`),M=((S=(R=o.mysteryArc)==null?void 0:R.nodes)==null?void 0:S.filter(n=>{const c=p(n.foreshadowingChapter||""),i=p(n.payoffChapter||""),u=c.length>0&&Math.min(...c)<=s&&Math.max(...c)>=r,m=i.length>0&&Math.min(...i)<=s&&Math.max(...i)>=r;return u||m}).map(n=>{const c=p(n.foreshadowingChapter||"").some(m=>m>=r&&m<=s),i=p(n.payoffChapter||"").some(m=>m>=r&&m<=s);let u="";return c&&i?u="【🎯 本批次需铺设且回收该伏笔】":c?u="【🎯 本批次为伏笔铺垫首发节点】":i&&(u="【🎯 本批次为该暗线悬念回收节点】"),`${u}
 起源/现状：${n.origin}
 剧情牵引：${n.progress}
 终极悬念：${n.suspense}`}).join(`
@@ -48,7 +48,7 @@ ${$}
 **要求**：本批次的第一集必须**自然流畅**地接上文。
 1. 如果上集结尾是悬念，这集开头必须承接（解开或推进）。
 2. **严禁断层**：不要突然跳跃时间线或场景，除非原著就是这么写的。
-`);const v=Q(d),A=(d?s>=d.totalChapters:!1)?`
+`);const v=J(d),A=(d?s>=d.totalChapters:!1)?`
 【结尾集收尾要求】
 - 本批次已经覆盖到整部作品的最终章节，最后一集必须承担全剧结尾功能。
 - 最后一集除了可以保留必要的结尾情绪张力外，更重要的是给出明确的“结尾收尾”信息，用于说明主线如何落地、人物命运如何安放、情绪余韵如何收束。
@@ -142,7 +142,7 @@ ${w}
     }
   ]
 }
-`;try{const n=await O(F,m,[{role:"user",content:N}],{responseFormat:{type:"json_object"}}),c=await L(n.text,e,t);return z(c,r,s)}catch(n){throw console.error("Reconstruction Failed",n),n}},b=async(e,l,o)=>{const t=k(e,o,"[次]gemini-3-flash-preview"),m=`
+`;try{const n=await O(F,g,[{role:"user",content:N}],{responseFormat:{type:"json_object"},timeout:12e4,maxRetries:1}),c=await L(n.text,e,t);return x(c,r,s)}catch(n){throw console.error("Reconstruction Failed",n),n}},b=async(e,l,o)=>{const t=k(e,o,"[次]gemini-3-flash-preview"),g=`
 你是一个专业的剧本大纲分析助手。
 请分析以下【原始分集大纲】，并将其拆解分类为结构化数据。
 **原则**：
@@ -171,4 +171,4 @@ ${l}
   "mainPlot": "原剧集大纲信息中的剧情描述",
   "targetChapter": "对应的原著章节号"
 }
-`;try{const $=await O(t,"[次]gemini-3-flash-preview",[{role:"user",content:m}],{responseFormat:{type:"json_object"}}),f=await H($.text,e,o);return{...f,targetChapter:J(f.targetChapter||"")}}catch($){return console.error("Outline Parsing Error:",$),{characterList:[],openingHook:"",foreshadowing:"",keyQuotes:"",worldSetting:"",mainPlot:l,targetChapter:""}}};export{Y as g,b as p};
+`;try{const $=await O(t,"[次]gemini-3-flash-preview",[{role:"user",content:g}],{responseFormat:{type:"json_object"},timeout:6e4}),f=await H($.text,e,o);return{...f,targetChapter:z(f.targetChapter||"")}}catch($){return console.error("Outline Parsing Error:",$),{characterList:[],openingHook:"",foreshadowing:"",keyQuotes:"",worldSetting:"",mainPlot:l,targetChapter:""}}};export{Y as g,b as p};
