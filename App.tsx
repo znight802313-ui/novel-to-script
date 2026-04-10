@@ -12,6 +12,7 @@ const BlueprintEditor = lazy(() => import('./components/BlueprintEditor'));
 const OutlineBuilder = lazy(() => import('./components/OutlineBuilder'));
 const ScriptGenerator = lazy(() => import('./components/ScriptGenerator'));
 const ScriptAuditor = lazy(() => import('./components/ScriptAuditor'));
+const IpAnalyzer = lazy(() => import('./components/IpAnalyzer'));
 
 const StepLoadingFallback: React.FC<{ message?: string }> = ({ message = '正在加载模块...' }) => (
   <div className="min-h-screen bg-paper flex items-center justify-center font-sans">
@@ -81,6 +82,25 @@ const App: React.FC = () => {
   const setProjectState = useCallback((updater: React.SetStateAction<ProjectState | null>) => {
     _setProjectState(prev => (typeof updater === 'function' ? updater(prev) : updater));
   }, []);
+
+  const handleIpAnalysisComplete = useCallback((report: import('./types').IpAnalysisReport) => {
+    setProjectState(prev => prev ? {
+      ...prev,
+      ipAnalysisReport: report,
+      currentStep: AppStep.BLUEPRINT
+    } : null);
+  }, [setProjectState]);
+
+  const handleIpAnalysisAutoSave = useCallback((report: import('./types').IpAnalysisReport) => {
+    setProjectState(prev => prev ? {
+      ...prev,
+      ipAnalysisReport: report
+    } : null);
+  }, [setProjectState]);
+
+  const handleIpAnalysisAbort = useCallback(() => {
+    setProjectState(null);
+  }, [setProjectState]);
 
   // 新建项目确认弹窗状态
   const [showNewProjectConfirm, setShowNewProjectConfirm] = useState(false);
@@ -222,6 +242,9 @@ const App: React.FC = () => {
   const confirmGoBack = () => {
     if (projectState) {
       switch (projectState.currentStep) {
+        case AppStep.IP_ANALYSIS:
+          setProjectState(null);
+          break;
         case AppStep.BLUEPRINT:
           setProjectState(null);
           break;
@@ -334,7 +357,31 @@ const App: React.FC = () => {
       );
   }
 
-  // Step 1: Blueprint
+  // Step 1: IP Analysis
+  if (projectState.currentStep === AppStep.IP_ANALYSIS) {
+      return (
+        <>
+          {NewProjectModal}
+          {GoBackModal}
+          <Suspense fallback={<StepLoadingFallback message="正在加载IP价值分析模块..." />}>
+            <IpAnalyzer
+              novelChapters={projectState.novelChapters}
+              novelName={projectState.novelName}
+              initialReport={projectState.ipAnalysisReport || null}
+              onComplete={handleIpAnalysisComplete}
+              onAutoSave={handleIpAnalysisAutoSave}
+              onAbort={handleIpAnalysisAbort}
+              apiKey={projectState.apiKey || ""}
+              baseUrl={projectState.baseUrl}
+              onNewProject={newProject}
+              onGoBack={goBack}
+            />
+          </Suspense>
+        </>
+      );
+  }
+
+  // Step 2: Blueprint
   if (projectState.currentStep === AppStep.BLUEPRINT) {
       return (
         <>
@@ -361,7 +408,7 @@ const App: React.FC = () => {
       );
   }
 
-  // Step 2: Outline
+  // Step 3: Outline
   if (projectState.currentStep === AppStep.OUTLINE) {
       return (
         <>
@@ -388,7 +435,7 @@ const App: React.FC = () => {
       );
   }
 
-  // Step 4: Standalone Audit Mode (or navigated to)
+  // Step 5: Standalone Audit Mode (or navigated to)
   if (projectState.currentStep === AppStep.AUDIT) {
       return (
           <div className="h-screen bg-white font-sans">
@@ -414,7 +461,7 @@ const App: React.FC = () => {
       )
   }
 
-  // Step 3: Script Generation
+  // Step 4: Script Generation
   return (
     <>
       {NewProjectModal}

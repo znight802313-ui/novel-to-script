@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Episode, Chapter, ChatMessage, ScriptVersion, AuditItem, CharacterProfile, ScriptGenerationConfig, ScriptNarrativeType, StoryBlueprint } from '../types';
 import { generateEpisodeScript, refineScript, parseOutlineWithAI, auditScript, AVAILABLE_MODELS, getRecommendedModel } from '../services/geminiService';
 import { getRelevantChapterContent } from '../utils/fileParser';
-import { Play, Loader2, RefreshCw, Settings, PauseCircle, Zap, BookOpen, ChevronDown, Send, MessageSquare, History, X, ArrowRight, AlertCircle, Check, ListChecks, Wand2, Plus, Trash2, UserPlus, Save, Eye, Quote, Anchor, Target, Users, Sparkles, Globe, Download, LayoutTemplate, Sparkle, Layers, User, Bot, RotateCcw, ScanEye, Home, Edit2 } from 'lucide-react';
+import { Play, Loader2, RefreshCw, Settings, PauseCircle, StopCircle, Zap, BookOpen, ChevronDown, Send, MessageSquare, History, X, ArrowRight, AlertCircle, Check, ListChecks, Wand2, Plus, Trash2, UserPlus, Save, Eye, Quote, Anchor, Target, Users, Sparkles, Globe, Download, LayoutTemplate, Sparkle, Layers, User, Bot, RotateCcw, ScanEye, Home, Edit2 } from 'lucide-react';
 import { useCapacityErrorHandler } from '../utils/useCapacityErrorHandler';
 import DiffTextView from './DiffTextView';
 import { useAiTask } from '../utils/useAiTask';
@@ -241,9 +241,29 @@ const ScriptGenerator: React.FC<ScriptGeneratorProps> = ({ episodes, chapters, b
 
   // Use a ref to access the latest episodes inside async callbacks without stale closures
   const episodesRef = useRef(episodes);
+  const isAutoGenRef = useRef(isAutoGenerating);
   useEffect(() => {
     episodesRef.current = episodes;
   }, [episodes]);
+  useEffect(() => {
+    isAutoGenRef.current = isAutoGenerating;
+  }, [isAutoGenerating]);
+
+  // 页面刷新/关闭时自动中止正在运行的生成任务
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (generationTask.isRunning) {
+        generationTask.cancel();
+      }
+      if (refineTask.isRunning) {
+        refineTask.cancel();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [generationTask, refineTask]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -599,7 +619,13 @@ const ScriptGenerator: React.FC<ScriptGeneratorProps> = ({ episodes, chapters, b
     } catch (error: any) {
       console.error(error);
       if (error.name === 'AbortError' || error.message?.includes('取消')) {
-        // 当用户主动取消生成时，不再覆盖状态为 error
+        // 当用户主动取消生成时，将状态重置为 pending，以便可以重新生成
+        if (isAutoGenRef.current) {
+          setIsAutoGenerating(false);
+        }
+        const cancelledEpisodes = [...episodesRef.current];
+        cancelledEpisodes[index] = { ...cancelledEpisodes[index], status: 'pending' };
+        onEpisodesUpdate(cancelledEpisodes);
         return;
       }
       const errorEpisodes = [...episodesRef.current];
@@ -1417,8 +1443,8 @@ const ScriptGenerator: React.FC<ScriptGeneratorProps> = ({ episodes, chapters, b
              <button
                 onClick={toggleAutoGenerate}
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold shadow-sm transition-all border-2 ${
-                  isAutoGenerating 
-                    ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' 
+                  isAutoGenerating
+                    ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200'
                     : 'bg-white text-gray-500 border-gray-200 hover:border-primary hover:text-primary'
                 }`}
              >
@@ -1432,6 +1458,17 @@ const ScriptGenerator: React.FC<ScriptGeneratorProps> = ({ episodes, chapters, b
                   </>
                 )}
              </button>
+
+             {/* Stop Generation Button */}
+             {(isGenerating || isAutoGenerating) && (
+               <button
+                 onClick={() => generationTask.cancel()}
+                 className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold shadow-sm transition-all bg-red-50 text-red-600 border-2 border-red-200 hover:bg-red-100 animate-pulse"
+                 title="立即停止当前生成任务"
+               >
+                 <StopCircle className="w-4 h-4" /> 停止生成
+               </button>
+             )}
 
              <button
                onClick={handleClearAllScripts}

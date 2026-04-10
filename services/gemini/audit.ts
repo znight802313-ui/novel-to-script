@@ -770,7 +770,9 @@ ${contextScript.substring(0, 500)} ...
 `;
 
     const response = await callUniversalAPI(config, '[次]gemini-3-flash-preview', [{ role: 'user', content: prompt }], {
-        responseFormat: { type: 'json_object' }
+        responseFormat: { type: 'json_object' },
+        timeout: 60000,
+        maxRetries: 1,
     });
     const result = parseFixOptionsResult(response.text);
     return result;
@@ -799,7 +801,10 @@ ${fullScript}
 请直接输出优化后的完整剧本，不要包含任何解释性文字。保持剧本格式。
 `;
 
-    const response = await callUniversalAPI(config, '[次]gemini-3-pro-preview-thinking', [{ role: 'user', content: prompt }]);
+    const response = await callUniversalAPI(config, '[次]gemini-3-pro-preview-thinking', [{ role: 'user', content: prompt }], {
+        timeout: 120000,
+        maxRetries: 1,
+    });
 
     return response.text || fullScript;
 };

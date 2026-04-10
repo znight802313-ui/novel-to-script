@@ -23,6 +23,43 @@ export interface ScriptVersion {
   type: 'manual' | 'ai' | 'auto';
 }
 
+// --- IP 价值分析 ---
+export interface IpDimensionScore {
+  dimension: string; // 维度名称
+  score: number;      // 0-100 分
+  comment: string;   // 简短评语
+}
+
+export interface IpAnalysisReport {
+  totalScore: number;          // 综合评分 0-100
+  summary: string;             // 整体评价摘要
+  dimensionScores: IpDimensionScore[];
+  recommendation: {
+    strategy: 'high_fidelity' | 'heavy_adaptation'; // IP遵循度高压缩 / 大幅度魔改
+    reasoning: string;         // 推荐理由
+    confidence: number;        // 推荐置信度 0-1
+  };
+  strengths: string[];         // 小说优势
+  weaknesses: string[];        // 小说劣势
+  shortDramaCompatibility: number; // 短剧改编适配度 0-100
+  // AI短剧类型适配度评估
+  aiDramaStyle?: {
+    recommended: '2d_anime' | '3d_anime' | 'ai_realistic'; // 推荐类型
+    scores: {
+      '2d_anime': number;       // 2D动漫适配分 0-100
+      '3d_anime': number;       // 3D动漫适配分 0-100
+      'ai_realistic': number;   // AI仿真人适配分 0-100
+    };
+    reasoning: string;          // 推荐理由
+  };
+  // 叙事角度推荐
+  narrativePerspective?: {
+    recommended: 'first-person' | 'third-person'; // 推荐叙事角度
+    reasoning: string;          // 推荐理由
+  };
+  timestamp: number;
+}
+
 // --- Legacy Audit Item (kept for backward compatibility if needed, but AuditAnnotation is preferred) ---
 export interface AuditItem {
   id: string;
@@ -325,14 +362,18 @@ export interface ProjectState {
   baseUrl?: string;
   blueprintLastAnalysisRange?: AnalysisRange | null;
   blueprintRetrySnapshot?: BlueprintRetrySnapshot | null;
+
+  // IP 价值分析结果
+  ipAnalysisReport?: IpAnalysisReport | null;
 }
 
 export enum AppStep {
   UPLOAD = 'UPLOAD',
-  BLUEPRINT = 'BLUEPRINT', // Step 1: Deconstruction
-  OUTLINE = 'OUTLINE',     // Step 2: Reconstruction
-  SCRIPT = 'SCRIPT',       // Step 3: Generation
-  AUDIT = 'AUDIT'          // Step 4: Standalone Audit
+  IP_ANALYSIS = 'IP_ANALYSIS', // Step 1: IP价值分析
+  BLUEPRINT = 'BLUEPRINT', // Step 2: Deconstruction
+  OUTLINE = 'OUTLINE',     // Step 3: Reconstruction
+  SCRIPT = 'SCRIPT',       // Step 4: Generation
+  AUDIT = 'AUDIT'          // Step 5: Standalone Audit
 }
 
 export interface ScriptGenerationConfig {

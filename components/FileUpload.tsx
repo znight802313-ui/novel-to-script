@@ -184,7 +184,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataParsed }) => {
       }
 
       let episodes: any[] = [];
-      let nextStep = AppStep.BLUEPRINT;
+      let nextStep = AppStep.IP_ANALYSIS;
 
       if (outlineFile) {
         let outlineText = "";

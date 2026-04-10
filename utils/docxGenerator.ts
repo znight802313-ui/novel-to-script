@@ -1,4 +1,4 @@
-import { StoryBlueprint, AnalyzedCharacter, Episode } from "../types";
+import { StoryBlueprint, AnalyzedCharacter, Episode, IpAnalysisReport } from "../types";
 
 // --- Helpers ---
 
@@ -820,6 +820,481 @@ export const exportBlueprintToDocx = async (
 
     const blob = await Packer.toBlob(doc);
     saveAs(blob, getSafeExportFileName(novelName, '_IP解构案.docx'));
+};
+
+// --- Export IP Analysis ---
+
+export const exportIpAnalysisToDocx = async (
+    report: IpAnalysisReport,
+    novelName: string
+) => {
+    const {
+        Document,
+        Packer,
+        Paragraph,
+        TextRun,
+        HeadingLevel,
+        Table,
+        TableRow,
+        TableCell,
+        WidthType,
+        BorderStyle,
+        TableLayoutType,
+        AlignmentType,
+        saveAs,
+    } = await loadDocxDeps();
+
+    const formatStrategyLabel = (strategy: IpAnalysisReport['recommendation']['strategy']) => (
+        strategy === 'high_fidelity' ? '高保真剧情压缩改编' : '剔骨剥皮式结构魔改'
+    );
+
+    const formatPerspectiveLabel = (perspective?: IpAnalysisReport['narrativePerspective']) => {
+        if (!perspective) return '无';
+        return perspective.recommended === 'first-person' ? '第一人称解说' : '第三人称演绎';
+    };
+
+    const formatDramaStyleLabel = (style?: IpAnalysisReport['aiDramaStyle']) => {
+        if (!style) return '无';
+        if (style.recommended === '2d_anime') return '2D动漫';
+        if (style.recommended === '3d_anime') return '3D动漫';
+        return 'AI仿真人';
+    };
+
+    const palette = {
+        text: "1F2937",
+        muted: "64748B",
+        border: "E5E7EB",
+        slate: "475569",
+        slateSoft: "F8FAFC",
+        indigo: "4F46E5",
+        indigoSoft: "EEF2FF",
+        purple: "7C3AED",
+        purpleSoft: "F5F3FF",
+        emerald: "059669",
+        emeraldSoft: "ECFDF5",
+        amber: "D97706",
+        amberSoft: "FFFBEB",
+        orange: "C2410C",
+        orangeSoft: "FFF7ED",
+        rose: "E11D48",
+        roseSoft: "FFF1F2",
+        blue: "2563EB",
+        blueSoft: "EFF6FF",
+    };
+
+    const CONTENT_WIDTH = 10440;
+    const createBorder = (color: string = palette.border, size: number = 1) => ({
+        style: BorderStyle.SINGLE,
+        size,
+        color,
+    });
+    const defaultCellBorders = {
+        top: createBorder(),
+        bottom: createBorder(),
+        left: createBorder(),
+        right: createBorder(),
+    };
+
+    const createParagraph = (
+        text: string,
+        options: {
+            color?: string;
+            bold?: boolean;
+            italics?: boolean;
+            size?: number;
+            alignment?: any;
+            spacingAfter?: number;
+            spacingBefore?: number;
+        } = {}
+    ) => new Paragraph({
+        alignment: options.alignment,
+        spacing: {
+            before: options.spacingBefore,
+            after: options.spacingAfter ?? 60,
+        },
+        children: [new TextRun({
+            text: text || '无',
+            color: options.color ?? palette.text,
+            bold: options.bold,
+            italics: options.italics,
+            size: options.size,
+        })],
+    });
+
+    const createSectionTitle = (title: string, color: string, subtitle?: string) => {
+        const nodes = [
+            new Paragraph({
+                spacing: { before: 320, after: subtitle ? 40 : 180 },
+                children: [new TextRun({ text: title, bold: true, color, size: 30 })],
+            }),
+        ];
+
+        if (subtitle) {
+            nodes.push(createParagraph(subtitle, {
+                color: palette.muted,
+                italics: true,
+                size: 19,
+                spacingAfter: 180,
+            }));
+        }
+
+        return nodes;
+    };
+
+    const createTableBlock = (
+        rows: any[],
+        columnWidths?: number[],
+        width: number = CONTENT_WIDTH
+    ) => new Table({
+        width: { size: width, type: WidthType.DXA },
+        layout: TableLayoutType.FIXED,
+        alignment: AlignmentType.LEFT,
+        indent: { size: 0, type: WidthType.DXA },
+        columnWidths,
+        rows,
+    });
+
+    const createHeaderCell = (
+        text: string,
+        fill: string,
+        width: number,
+        color: string,
+        widthType: any = WidthType.PERCENTAGE
+    ) => new TableCell({
+        width: { size: width, type: widthType },
+        shading: { fill },
+        margins: { top: 100, bottom: 100, left: 120, right: 120 },
+        borders: defaultCellBorders,
+        children: [createParagraph(text, {
+            bold: true,
+            color,
+            size: 21,
+            alignment: AlignmentType.CENTER,
+            spacingAfter: 0,
+        })],
+    });
+
+    const createBodyCell = (
+        content: string | any[],
+        options: {
+            width?: number;
+            widthType?: any;
+            fill?: string;
+            align?: any;
+        } = {}
+    ) => new TableCell({
+        width: options.width ? { size: options.width, type: options.widthType || WidthType.PERCENTAGE } : undefined,
+        shading: options.fill ? { fill: options.fill } : undefined,
+        margins: { top: 110, bottom: 110, left: 120, right: 120 },
+        borders: defaultCellBorders,
+        children: Array.isArray(content)
+            ? content
+            : [createParagraph(content || '无', {
+                alignment: options.align,
+                size: 21,
+                spacingAfter: 0,
+            })],
+    });
+
+    const createInfoCard = (
+        label: string,
+        text: string,
+        accentColor: string,
+        fill: string = "FFFFFF"
+    ) => createTableBlock([
+        new TableRow({
+            children: [
+                new TableCell({
+                    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+                    shading: { fill },
+                    margins: { top: 150, bottom: 150, left: 180, right: 180 },
+                    borders: {
+                        top: createBorder(),
+                        bottom: createBorder(),
+                        right: createBorder(),
+                        left: createBorder(accentColor, 6),
+                    },
+                    children: [
+                        createParagraph(label, {
+                            color: accentColor,
+                            bold: true,
+                            size: 21,
+                            spacingAfter: 70,
+                        }),
+                        ...String(text || '无').split('\n').filter(Boolean).map((line, index, arr) => createParagraph(line, {
+                            color: line === "无" ? palette.muted : palette.text,
+                            italics: line === "无",
+                            size: 21,
+                            spacingAfter: index === arr.length - 1 ? 0 : 55,
+                        })),
+                    ]
+                })
+            ]
+        })
+    ], [CONTENT_WIDTH]);
+
+    const createListParagraphs = (items: string[], color: string = palette.text) => {
+        const normalized = items.map(item => item.trim()).filter(Boolean);
+        if (normalized.length === 0) {
+            return [createParagraph("无", { color: palette.muted, italics: true, spacingAfter: 0 })];
+        }
+
+        return normalized.map(item => new Paragraph({
+            bullet: { level: 0 },
+            spacing: { after: 40 },
+            children: [new TextRun({ text: item, color, size: 21 })],
+        }));
+    };
+
+    const createSummaryTable = (items: Array<[string, string]>) => {
+        const widths = [1800, 3420, 1800, 3420];
+        const rows: any[] = [];
+        for (let index = 0; index < items.length; index += 2) {
+            const [leftLabel, leftValue] = items[index];
+            const [rightLabel, rightValue] = items[index + 1] || ["", ""];
+            rows.push(new TableRow({
+                children: [
+                    createHeaderCell(leftLabel, palette.indigoSoft, widths[0], palette.indigo, WidthType.DXA),
+                    createBodyCell(leftValue, { width: widths[1], widthType: WidthType.DXA }),
+                    createHeaderCell(rightLabel || " ", palette.indigoSoft, widths[2], palette.indigo, WidthType.DXA),
+                    createBodyCell(rightValue || " ", { width: widths[3], widthType: WidthType.DXA }),
+                ]
+            }));
+        }
+        return createTableBlock(rows, widths);
+    };
+
+    const getScorePalette = (score: number) => {
+        if (score >= 85) return { fill: palette.emeraldSoft, color: palette.emerald };
+        if (score >= 70) return { fill: palette.blueSoft, color: palette.blue };
+        if (score >= 55) return { fill: palette.amberSoft, color: palette.amber };
+        if (score >= 40) return { fill: palette.orangeSoft, color: palette.orange };
+        return { fill: palette.roseSoft, color: palette.rose };
+    };
+
+    const children: any[] = [];
+    const exportDate = new Date(report.timestamp || Date.now()).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+
+    children.push(
+        new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 80, after: 80 },
+            children: [new TextRun({
+                text: `《${novelName || '未命名项目'}》`,
+                bold: true,
+                color: palette.text,
+                size: 38,
+            })],
+        }),
+        createParagraph("IP 价值分析报告", {
+            alignment: AlignmentType.CENTER,
+            color: palette.indigo,
+            bold: true,
+            size: 26,
+            spacingAfter: 40,
+        }),
+        createParagraph("尽量还原线上展示逻辑的导出版式，便于复盘评分、策略与改编方向。", {
+            alignment: AlignmentType.CENTER,
+            color: palette.muted,
+            italics: true,
+            size: 18,
+            spacingAfter: 180,
+        }),
+        createSummaryTable([
+            ["项目名称", novelName || '未命名项目'],
+            ["导出时间", exportDate],
+            ["综合评分", `${report.totalScore} 分`],
+            ["短剧适配度", `${report.shortDramaCompatibility} 分`],
+            ["改编策略", formatStrategyLabel(report.recommendation.strategy)],
+            ["策略置信度", `${Math.round((report.recommendation.confidence || 0) * 100)}%`],
+        ])
+    );
+
+    children.push(
+        ...createSectionTitle('一、核心结论', palette.indigo, '对应线上顶部的综合评分、综合评价与核心建议区域。')
+    );
+    children.push(createTableBlock([
+        new TableRow({
+            children: [
+                new TableCell({
+                    width: { size: 2600, type: WidthType.DXA },
+                    shading: { fill: palette.indigoSoft },
+                    margins: { top: 180, bottom: 180, left: 180, right: 180 },
+                    borders: defaultCellBorders,
+                    children: [
+                        createParagraph("IP 价值综合评分", {
+                            color: palette.muted,
+                            bold: true,
+                            size: 18,
+                            alignment: AlignmentType.CENTER,
+                            spacingAfter: 80,
+                        }),
+                        createParagraph(String(report.totalScore), {
+                            color: getScorePalette(report.totalScore).color,
+                            bold: true,
+                            size: 56,
+                            alignment: AlignmentType.CENTER,
+                            spacingAfter: 80,
+                        }),
+                        createParagraph(`短剧适配度 ${report.shortDramaCompatibility} 分`, {
+                            color: palette.indigo,
+                            bold: true,
+                            size: 22,
+                            alignment: AlignmentType.CENTER,
+                            spacingAfter: 0,
+                        }),
+                    ],
+                }),
+                new TableCell({
+                    width: { size: 7840, type: WidthType.DXA },
+                    margins: { top: 0, bottom: 0, left: 0, right: 0 },
+                    borders: {
+                        top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                        bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                        left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                        right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                    },
+                    children: [
+                        createInfoCard("综合评价", report.summary, palette.blue, palette.blueSoft),
+                        createInfoCard("核心建议", `${formatStrategyLabel(report.recommendation.strategy)}\n${report.recommendation.reasoning}`, palette.amber, palette.amberSoft),
+                    ],
+                }),
+            ],
+        }),
+    ], [2600, 7840]));
+
+    const recommendationRows: any[] = [
+        new TableRow({
+            children: [
+                createHeaderCell("推荐叙事角度", palette.emeraldSoft, 2200, palette.emerald, WidthType.DXA),
+                createBodyCell(formatPerspectiveLabel(report.narrativePerspective), { width: 3000, widthType: WidthType.DXA }),
+                createHeaderCell("推荐 AI 短剧形态", palette.purpleSoft, 2200, palette.purple, WidthType.DXA),
+                createBodyCell(formatDramaStyleLabel(report.aiDramaStyle), { width: 3040, widthType: WidthType.DXA }),
+            ],
+        }),
+    ];
+    children.push(createTableBlock(recommendationRows, [2200, 3000, 2200, 3040]));
+
+    children.push(...createSectionTitle('二、维度详细评分', palette.indigo, '对应线上维度详细评估区域，保留评分层次与评语。'));
+    children.push(createTableBlock([
+            new TableRow({
+                children: [
+                    createHeaderCell('维度', palette.indigoSoft, 2200, palette.indigo, WidthType.DXA),
+                    createHeaderCell('分数', palette.indigoSoft, 1200, palette.indigo, WidthType.DXA),
+                    createHeaderCell('评语', palette.indigoSoft, 7040, palette.indigo, WidthType.DXA),
+                ],
+            }),
+            ...report.dimensionScores.map(item => new TableRow({
+                children: [
+                    createBodyCell(item.dimension, { width: 2200, widthType: WidthType.DXA }),
+                    createBodyCell(`${item.score}`, {
+                        width: 1200,
+                        widthType: WidthType.DXA,
+                        align: AlignmentType.CENTER,
+                        fill: getScorePalette(item.score).fill,
+                    }),
+                    createBodyCell(item.comment, { width: 7040, widthType: WidthType.DXA }),
+                ],
+            })),
+        ], [2200, 1200, 7040]));
+
+    if (report.aiDramaStyle) {
+        children.push(
+            ...createSectionTitle('三、AI 短剧类型适配度', palette.purple, '对应线上 AI 短剧类型适配度卡片。'),
+            createInfoCard(
+                `推荐类型：${formatDramaStyleLabel(report.aiDramaStyle)}`,
+                `2D动漫：${report.aiDramaStyle.scores['2d_anime']} 分\n3D动漫：${report.aiDramaStyle.scores['3d_anime']} 分\nAI仿真人：${report.aiDramaStyle.scores['ai_realistic']} 分\n\n${report.aiDramaStyle.reasoning}`,
+                palette.purple,
+                palette.purpleSoft
+            )
+        );
+    }
+
+    if (report.narrativePerspective) {
+        children.push(
+            ...createSectionTitle('四、叙事角度建议', palette.emerald, '对应线上叙事角度推荐卡片。'),
+            createInfoCard(
+                `推荐视角：${formatPerspectiveLabel(report.narrativePerspective)}`,
+                report.narrativePerspective.reasoning,
+                palette.emerald,
+                palette.emeraldSoft
+            )
+        );
+    }
+
+    children.push(...createSectionTitle('五、优势与改进空间', palette.indigo, '对应线上优势 / 改进空间双栏区域。'));
+    children.push(createTableBlock([
+        new TableRow({
+            children: [
+                new TableCell({
+                    width: { size: 5100, type: WidthType.DXA },
+                    shading: { fill: palette.emeraldSoft },
+                    margins: { top: 150, bottom: 150, left: 180, right: 180 },
+                    borders: {
+                        top: createBorder(),
+                        bottom: createBorder(),
+                        right: createBorder(),
+                        left: createBorder(palette.emerald, 6),
+                    },
+                    children: [
+                        createParagraph("小说优势", {
+                            color: palette.emerald,
+                            bold: true,
+                            size: 24,
+                            spacingAfter: 90,
+                        }),
+                        ...createListParagraphs(report.strengths, palette.emerald),
+                    ],
+                }),
+                new TableCell({
+                    width: { size: 5340, type: WidthType.DXA },
+                    shading: { fill: palette.orangeSoft },
+                    margins: { top: 150, bottom: 150, left: 180, right: 180 },
+                    borders: {
+                        top: createBorder(),
+                        bottom: createBorder(),
+                        right: createBorder(),
+                        left: createBorder(palette.orange, 6),
+                    },
+                    children: [
+                        createParagraph("改进空间", {
+                            color: palette.orange,
+                            bold: true,
+                            size: 24,
+                            spacingAfter: 90,
+                        }),
+                        ...createListParagraphs(report.weaknesses, palette.orange),
+                    ],
+                }),
+            ],
+        }),
+    ], [5100, 5340]));
+
+    const doc = new Document({
+        sections: [{
+            properties: {
+                page: {
+                    margin: {
+                        top: 720,
+                        right: 720,
+                        bottom: 720,
+                        left: 720,
+                    },
+                },
+            },
+            children,
+        }],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, getSafeExportFileName(novelName, '_IP价值分析报告.docx'));
 };
 
 // --- Export Outline (Step 2) ---

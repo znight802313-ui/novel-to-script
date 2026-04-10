@@ -281,7 +281,9 @@ ${viralTips}
 
     try {
         const response = await callUniversalAPI(config, modelId, [{ role: 'user', content: prompt }], {
-            responseFormat: { type: 'json_object' }
+            responseFormat: { type: 'json_object' },
+            timeout: 120000,
+            maxRetries: 1,
         });
 
         const parsed = await parseDraftEpisodesResult(response.text, apiKey, baseUrl);
@@ -342,7 +344,8 @@ ${rawOutline}
 
   try {
     const response = await callUniversalAPI(config, '[次]gemini-3-flash-preview', [{ role: 'user', content: prompt }], {
-        responseFormat: { type: 'json_object' }
+        responseFormat: { type: 'json_object' },
+        timeout: 60000,
     });
 
     const result = await parseOutlineParseResult(response.text, apiKey, baseUrl);

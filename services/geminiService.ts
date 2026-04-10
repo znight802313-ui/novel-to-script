@@ -7,6 +7,9 @@ export {
   testApiConnection,
 } from './gemini/analysis';
 export {
+  analyzeIpValue,
+} from './gemini/ipAnalysis';
+export {
   generateDraftEpisodes,
   parseOutlineWithAI,
 } from './gemini/outline';

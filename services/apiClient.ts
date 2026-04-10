@@ -40,16 +40,22 @@ export interface APIResponse {
 
 export const AVAILABLE_MODELS: ModelConfig[] = [
   {
+    id: '[次]claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6 (次)',
+    description: 'Anthropic Claude 模型，快速稳定 (次)',
+    fallback: '[次]gemini-3.1-pro-preview-thinking'
+  },
+  {
+    id: '[次]claude-opus-4-6',
+    name: 'Claude Opus 4.6 (次) ⭐',
+    description: '最强大的 Claude Opus 模型，适合深度创作评测 (次)',
+    fallback: '[次]claude-sonnet-4-6'
+  },
+  {
     id: 'claude-sonnet-4-6',
     name: 'Claude Sonnet 4.6 (MixAI) ⭐',
     description: '最新最强的 Claude 模型，推理和创作能力全面提升',
-    fallback: '[次]claude-sonnet-4-6-thinking'
-  },
-  {
-    id: '[次]claude-sonnet-4-6-thinking',
-    name: 'Claude 4.6 Sonnet Thinking (次)',
-    description: '最强推理能力，适合复杂分析任务',
-    fallback: '[次]gemini-3-pro-preview-thinking'
+    fallback: '[次]gemini-3.1-pro-preview-thinking'
   },
   {
     id: '[次]gemini-3.1-pro-preview-thinking',
@@ -79,7 +85,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     id: 'claude-sonnet-4-5-20250929',
     name: 'Claude Sonnet 4.5 (MixAI)',
     description: 'MixAI 提供的 Claude Sonnet 模型',
-    fallback: '[次]claude-sonnet-4-6-thinking'
+    fallback: '[次]gemini-3.1-pro-preview-thinking'
   },
   {
     id: 'claude-opus-4-6-a',
@@ -92,6 +98,18 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     name: 'GPT-5.4 (AIXJ)',
     description: '最新 GPT 5.4 模型，高推理倾向',
     fallback: '[次]gemini-3.1-pro-preview-thinking'
+  },
+  {
+    id: 'rsx-claude-opus-4-6',
+    name: 'Claude Opus 4.6 (RSX) ⭐',
+    description: 'RSX 提供的 Claude Opus 模型，支持超长上下文（200K tokens）',
+    fallback: 'rsx-claude-sonnet-4-6'
+  },
+  {
+    id: 'rsx-claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6 (RSX)',
+    description: 'RSX 提供的 Claude Sonnet 模型，上下文充足',
+    fallback: 'claude-sonnet-4-6'
   },
 ];
 
@@ -107,7 +125,6 @@ export const DEFAULT_API_CONFIG = {
 };
 
 // MixAI 配置 — API Key 从环境变量读取，不硬编码在源码中
-// 请在 .env.local 中配置：VITE_MIXAI_KEY_CLAUDE_SONNET_46 等
 const MIXAI_CONFIG = {
   baseUrl: 'https://mixai.cc/v1',
   models: {
@@ -123,6 +140,15 @@ const AIXJ_CONFIG = {
   apiKey: import.meta.env.VITE_AIXJ_KEY || '',
 };
 
+// RSX 配置 — 模型 ID 带 rsx- 前缀以区分 MixAI
+const RSX_CONFIG = {
+  baseUrl: 'https://rsxermu666.cn/v1',
+  models: {
+    'rsx-claude-sonnet-4-6': import.meta.env.VITE_RSX_KEY || '',
+    'rsx-claude-opus-4-6': import.meta.env.VITE_RSX_KEY || '',
+  }
+};
+
 // ==================== 模型上下文限制 ====================
 
 /**
@@ -131,11 +157,12 @@ const AIXJ_CONFIG = {
  */
 export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // Claude Opus 4.6 — 200K tokens → ~500K chars，保守用 400K
+  '[次]claude-opus-4-6': 400000,
   'claude-opus-4-6-a': 400000,
   // Claude Sonnet 4.6 / 4.5 — 200K tokens → 保守用 300K
+  '[次]claude-sonnet-4-6': 300000,
   'claude-sonnet-4-6': 300000,
   'claude-sonnet-4-5-20250929': 300000,
-  '[次]claude-sonnet-4-6-thinking': 300000,
   // Gemini 3.1 Pro — 1M tokens → 保守用 800K chars
   '[次]gemini-3.1-pro-preview-thinking': 800000,
   '[次]gemini-3.1-pro-preview': 800000,
@@ -144,6 +171,9 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   '[次]gemini-3-flash-preview': 500000,
   // GPT-5.2 — 保守估算 128K tokens → 150K chars
   '[次]gpt-5.2': 150000,
+  // Claude Sonnet/Opus 4.6 (RSX) — 200K tokens → 保守用 300K
+  'rsx-claude-sonnet-4-6': 300000,
+  'rsx-claude-opus-4-6': 400000,
 };
 
 /**
@@ -174,11 +204,20 @@ export const getAPIConfig = (
   baseUrl?: string,
   modelId?: string
 ): APIConfig => {
-  // 如果是 MixAI 模型，使用对应的 API Key
+  // 如果是 MixAI 模型
   if (modelId && isMixAIModel(modelId)) {
     return {
       apiKey: MIXAI_CONFIG.models[modelId as keyof typeof MIXAI_CONFIG.models],
       baseUrl: MIXAI_CONFIG.baseUrl,
+    };
+  }
+
+  // 如果是 RSX 模型（通过 rsx- 前缀识别）
+  if (modelId && modelId.startsWith('rsx-')) {
+    const baseModelId = modelId.slice('rsx-'.length) as keyof typeof RSX_CONFIG.models;
+    return {
+      apiKey: RSX_CONFIG.models[baseModelId] || '',
+      baseUrl: RSX_CONFIG.baseUrl,
     };
   }
 
@@ -350,8 +389,12 @@ export const callUniversalAPI = async (
   const maxRetries = options?.maxRetries ?? 2; // 默认重试 2 次
 
   // 构建请求体
+  // 剥离 rsx- 前缀，因为 RSX API 不认识这个前缀
+  const actualModelName = modelName.startsWith('rsx-')
+    ? modelName.slice('rsx-'.length)
+    : modelName;
   const requestBody: any = {
-    model: modelName,
+    model: actualModelName,
     messages: messages,
     temperature: options?.temperature ?? 0.7,
   };

@@ -169,7 +169,9 @@ ${optimizedNovelContent
         { role: 'user', content: prompt }
       ], {
         temperature: 0.75,
-        signal: options?.signal
+        signal: options?.signal,
+        timeout: 120000,   // 2分钟超时
+        maxRetries: 1,     // 只重试1次，最多等待4分钟
     });
     return response.text || "生成内容为空";
   } catch (error) {
@@ -219,7 +221,9 @@ ${characterContext}
       { role: 'user', content: prompt }
     ], {
       temperature: 0.3,
-      responseFormat: { type: 'json_object' }
+      responseFormat: { type: 'json_object' },
+      timeout: 60000,   // 1分钟超时
+      maxRetries: 1,
     });
 
     const result = safeJsonParse(response.text, 'extractNarrator');
@@ -312,7 +316,9 @@ ${userInstruction}
 
   try {
     const response = await callUniversalAPI(config, modelId, [{ role: 'user', content: prompt }], {
-        temperature: 0.7
+        temperature: 0.7,
+        timeout: 120000,
+        maxRetries: 1,
     });
 
     const fullText = response.text || "";

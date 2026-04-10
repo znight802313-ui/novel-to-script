@@ -745,45 +745,70 @@ export const safeJsonParse = (text: string, context: string = "Unknown"): any =>
 
     // 如果是大纲、架构或人物档案解析失败，直接抛出异常让 safeJsonParseAsync 去尝试 Gemini 修复
     // 或让外层分析服务捕获，进而触发界面上的重试按钮
+    // IP Analysis 也需要走 Gemini 修复路径，因为它的维度名和正则默认值不匹配
     if (
       context.includes('Outline') ||
       context.includes('Architecture') ||
       context.includes('Character') ||
-      context.includes('DraftEpisodes')
+      context.includes('DraftEpisodes') ||
+      context.includes('IP Analysis') ||
+      context.includes('IpAnalysis')
     ) {
       throw new Error(`JSON_PARSE_FAILED_${context}`);
     }
-    // 提取 totalScore
-    const scoreMatch = text.match(/"totalScore"\s*:\s*(\d+)/);
-    const totalScore = scoreMatch ? parseInt(scoreMatch[1]) : 60;
-
     // 提取 summary
     const summaryMatch = text.match(/"summary"\s*:\s*"([^"]{0,500})"/);
     const summary = summaryMatch ? summaryMatch[1] : "JSON解析失败，已提取部分数据";
 
-    // 提取 dimensionScores 数组
+    // 提取 dimensionScores 数组 - 支持灵活字段顺序
     const dimensionScores: any[] = [];
-    const dimensionRegex = /"dimension"\s*:\s*"([^"]+)"\s*,\s*"score"\s*:\s*(\d+)\s*,\s*"comment"\s*:\s*"([^"]{0,200})"/g;
-    let dimMatch;
-    while ((dimMatch = dimensionRegex.exec(text)) !== null) {
-      dimensionScores.push({
-        dimension: dimMatch[1],
-        score: parseInt(dimMatch[2]),
-        comment: dimMatch[3]
-      });
+    // 尝试多种正则模式以适应不同的 JSON 字段顺序
+    const regexPatterns = [
+      // 模式1: dimension, score, comment (严格顺序)
+      /"dimension"\s*:\s*"([^"]+)"\s*,\s*"score"\s*:\s*(\d+)\s*,\s*"comment"\s*:\s*"([^"]{0,200})"/g,
+      // 模式2: dimension, score (comment在后面)
+      /"dimension"\s*:\s*"([^"]+)"\s*,\s*"score"\s*:\s*(\d+)/g,
+      // 模式3: dimension, 任意字段..., score
+      /"dimension"\s*:\s*"([^"]+)"[^}]{0,300}?"score"\s*:\s*(\d+)/g,
+      // 模式4: 宽松模式 - 捕获 dimension 和后面的数字分数
+      /"(?:dimension|维度)"\s*:\s*"([^"]+)"/g,
+    ];
+
+    const foundDimensions = new Set<string>();
+    for (let pi = 0; pi < 2; pi++) {
+      const pattern = regexPatterns[pi];
+      let match;
+      regexPatterns[pi].lastIndex = 0;
+      while ((match = pattern.exec(text)) !== null) {
+        const dim = match[1].trim();
+        if (!foundDimensions.has(dim) && dim.length > 0 && dim.length < 20) {
+          const score = pi < 2 ? parseInt(match[2]) : 55;
+          foundDimensions.add(dim);
+          dimensionScores.push({
+            dimension: dim,
+            score: score,
+            comment: "数据提取不完整"
+          });
+        }
+      }
+      if (dimensionScores.length > 0) break;
     }
 
-    // 如果没有提取到维度评分，使用默认值
+    // 提取 shortDramaCompatibility / hookDesignScore
+    const compatMatch = text.match(/"shortDramaCompatibility"\s*:\s*(\d+)/);
+    const hookMatch = text.match(/"hookDesignScore"\s*:\s*(\d+)/);
+    const compat = compatMatch ? parseInt(compatMatch[1]) : undefined;
+    const hook = hookMatch ? parseInt(hookMatch[1]) : undefined;
+
+    // 提取 totalScore (兜底)
+    const scoreMatch = text.match(/"totalScore"\s*:\s*(\d+)/);
+    const totalScore = scoreMatch ? parseInt(scoreMatch[1]) : (compat || 60);
+
+    // 如果没有提取到维度评分，使用安全默认值
     if (dimensionScores.length === 0) {
-      dimensionScores.push(
-        { dimension: "逻辑闭环", score: 65, comment: "数据提取不完整" },
-        { dimension: "情节推动", score: 65, comment: "数据提取不完整" },
-        { dimension: "钩子与节奏", score: 65, comment: "数据提取不完整" },
-        { dimension: "人设还原", score: 65, comment: "数据提取不完整" },
-        { dimension: "改编质量", score: 65, comment: "数据提取不完整" },
-        { dimension: "情绪带动", score: 65, comment: "数据提取不完整" },
-        { dimension: "画面表现", score: 65, comment: "数据提取不完整" }
-      );
+      console.warn(`[${context}] ⚠️ 无法从响应中提取维度评分，使用安全默认值`);
+      // 不再使用错误的 hardcoded 维度名，只返回一个空数组让外层用 50 填充
+      // dimensionScores 保持为空数组
     }
 
     // 提取 annotations 数组
